@@ -20,7 +20,8 @@ class DatabaseSettings(BaseSettings):
 
     url: str = Field(
         default="postgresql+asyncpg://oce:oce@localhost:5432/oce",
-        description="数据库连接 URL"
+        description="数据库连接 URL",
+        json_schema_extra={"tier": 1, "scope": "service"},
     )
     pool_size: int = Field(default=5, ge=1, le=100, description="连接池大小")
     max_overflow: int = Field(default=5, ge=0, le=100, description="连接池溢出上限")
@@ -46,13 +47,14 @@ class MilvusSettings(BaseSettings):
     endpoint: str = Field(
         default="http://localhost:19530",
         description="Milvus 端点：HTTP 服务地址，或本地 Milvus Lite 文件路径",
+        json_schema_extra={"tier": 1, "scope": "service"},
     )
     token: str | None = Field(default=None, description="认证 token（Zilliz Cloud）")
 
     # Collection
     collection_name: str = Field(default="oce_chunks", description="Collection 名称")
     path_collection_name: str = Field(
-        default="oce_paths_v1",
+        default="oce_paths",
         description="路径索引 Collection 名称",
     )
     dense_dim: int = Field(default=1024, description="密集向量维度")
@@ -61,10 +63,10 @@ class MilvusSettings(BaseSettings):
     dense_index_type: str = Field(default="HNSW", description="密集向量索引类型")
     dense_metric_type: str = Field(default="COSINE", description="密集向量距离度量")
 
-    # HNSW 参数
-    hnsw_m: int = Field(default=16, ge=4, le=64, description="HNSW M 参数")
-    hnsw_ef_construction: int = Field(default=256, ge=8, le=512, description="HNSW efConstruction")
-    hnsw_ef_search: int = Field(default=64, ge=8, le=2048, description="HNSW ef（搜索时）")
+    # HNSW 参数（默认采用偏召回质量的生产值；建库更慢但检索更准）
+    hnsw_m: int = Field(default=32, ge=4, le=64, description="HNSW M 参数")
+    hnsw_ef_construction: int = Field(default=512, ge=8, le=512, description="HNSW efConstruction")
+    hnsw_ef_search: int = Field(default=512, ge=8, le=2048, description="HNSW ef（搜索时）")
 
 
 class EmbeddingSettings(BaseSettings):
@@ -77,14 +79,23 @@ class EmbeddingSettings(BaseSettings):
         extra="ignore",
     )
 
-    enabled: bool = Field(default=True, description="是否启用嵌入(关闭时只切块不嵌入)")
-    endpoint: str = Field(
-        default="https://api.siliconflow.cn/v1/embeddings",
-        description="OpenAI 兼容的 embedding 端点",
+    enabled: bool = Field(
+        default=True, description="是否启用嵌入(关闭时只切块不嵌入)", json_schema_extra={"tier": 2}
     )
-    api_key: SecretStr | None = Field(default=None, description="Embedding API 密钥")
-    model: str = Field(default="Qwen/Qwen3-Embedding-4B", description="嵌入模型")
-    dimensions: int = Field(default=1024, ge=1, description="向量维度")
+    endpoint: str = Field(
+        default="http://127.0.0.1:8994/v1/embeddings",
+        description="OpenAI 兼容的 embedding 端点",
+        json_schema_extra={"tier": 2},
+    )
+    api_key: SecretStr | None = Field(
+        default="sk-oce-llama-server",
+        description="Embedding API 密钥；model_credentials 无 active kind=embed 行时回落此值",
+        json_schema_extra={"tier": 1},
+    )
+    model: str = Field(
+        default="f2llm-v2-0.6b", description="嵌入模型", json_schema_extra={"tier": 2}
+    )
+    dimensions: int = Field(default=1024, ge=1, description="向量维度", json_schema_extra={"tier": 2})
     max_batch_size: int = Field(default=32, ge=1, le=256, description="单请求文本数")
     max_batch_chars: int = Field(
         default=32_000,
@@ -112,13 +123,19 @@ class RerankSettings(BaseSettings):
         extra="ignore",
     )
 
-    enabled: bool = Field(default=False, description="是否启用 API 重排（已被 LLM 重排取代，默认关）")
+    enabled: bool = Field(
+        default=True, description="是否启用 API 重排",
+        json_schema_extra={"tier": 2},
+    )
     endpoint: str = Field(
-        default="https://api.siliconflow.cn/v1/rerank",
+        default="http://127.0.0.1:8994/v1/rerank",
         description="Rerank 端点",
+        json_schema_extra={"tier": 2},
     )
     api_key: SecretStr | None = Field(default=None, description="空值时复用 embedding key")
-    model: str = Field(default="Qwen/Qwen3-Reranker-0.6B", description="重排模型")
+    model: str = Field(
+        default="jina-reranker-v3.5", description="重排模型", json_schema_extra={"tier": 2}
+    )
     top_n: int = Field(default=10, ge=1, le=100, description="重排返回数")
     min_score: float = Field(default=0.05, ge=0.0, le=1.0, description="最低重排分")
     timeout_seconds: float = Field(default=60.0, gt=0, description="请求超时秒数")
@@ -139,12 +156,19 @@ class LLMSettings(BaseSettings):
         extra="ignore",
     )
 
-    rerank_enabled: bool = Field(default=True, description="是否启用 LLM 语义重排（默认主重排层）")
-    model: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="LLM 模型")
-    api_key: SecretStr = Field(default="", description="LLM API Key")
+    rerank_enabled: bool = Field(
+        default=False, description="是否启用 LLM 语义重排", json_schema_extra={"tier": 2}
+    )
+    model: str = Field(
+        default="Qwen/Qwen2.5-7B-Instruct", description="LLM 模型", json_schema_extra={"tier": 2}
+    )
+    api_key: SecretStr = Field(
+        default="", description="LLM API Key", json_schema_extra={"tier": 2}
+    )
     base_url: str = Field(
         default="https://api.siliconflow.cn/v1",
         description="LLM API Base URL",
+        json_schema_extra={"tier": 2},
     )
     proxy: str | None = Field(default=None, description="LLM API HTTP 代理")
     max_candidates: int = Field(default=50, ge=10, le=100, description="LLM 重排最大候选数")
@@ -198,7 +222,9 @@ class RetrievalSettings(BaseSettings):
     )
 
     # 仓库级多意图召回
-    query_decomposition_enabled: bool = Field(default=True, description="是否分解多句检索请求")
+    query_decomposition_enabled: bool = Field(
+        default=True, description="是否分解多句检索请求", json_schema_extra={"tier": 2}
+    )
     query_max_queries: int = Field(default=4, ge=1, le=8, description="原查询和子查询总数上限")
     query_min_facet_chars: int = Field(default=8, ge=1, description="子查询最少字符数")
     query_facet_weight: float = Field(default=0.75, gt=0.0, le=1.0, description="子查询融合权重")
@@ -211,23 +237,33 @@ class RetrievalSettings(BaseSettings):
 
     # Query rewrite (LLM-based query expansion for better recall)
     # 默认关闭：仅跨语言文件名等特殊场景有明显增益，通用检索收益有限
-    query_rewrite_enabled: bool = Field(default=False, description="是否启用 LLM 查询改写")
+    query_rewrite_enabled: bool = Field(
+        default=False, description="是否启用 LLM 查询改写", json_schema_extra={"tier": 2}
+    )
     query_rewrite_model: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="查询改写使用的 LLM 模型")
     query_rewrite_num: int = Field(default=3, ge=1, le=5, description="生成改写查询的数量")
 
     # Path index (独立路径索引用于文件名查询)
-    path_index_enabled: bool = Field(default=True, description="是否启用路径索引（文件名查询增强）")
+    path_index_enabled: bool = Field(
+        default=True, description="是否启用路径索引（文件名查询增强）", json_schema_extra={"tier": 2}
+    )
     # 路径分数与内容分数同为 COSINE 量纲，加权相加而非替换，避免挤掉正确 chunk
     path_boost_weight: float = Field(
         default=0.5, ge=0.0, le=2.0, description="路径索引命中对同文件 chunk 的加权系数"
     )
 
     # Intent classification (意图分类驱动的检索策略)
-    intent_classification_enabled: bool = Field(default=True, description="是否启用查询意图分类（LLM-based）")
+    intent_classification_enabled: bool = Field(
+        default=True, description="是否启用查询意图分类（LLM-based）", json_schema_extra={"tier": 2}
+    )
 
 
 class RedisSettings(BaseSettings):
-    """Redis 配置（任务队列）"""
+    """Redis 配置（任务队列）
+
+    queue_name 派生三个键：{name} 主队列；{name}:processing 处理中（worker 取走
+    暂存，崩溃后可恢复）；{name}:pending 在飞哨兵集合（入队去重，防幽灵消息堆积）。
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="REDIS_",
@@ -236,7 +272,11 @@ class RedisSettings(BaseSettings):
         extra="ignore",
     )
 
-    url: str = Field(default="redis://localhost:6379/0", description="Redis 连接 URL")
+    url: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis 连接 URL",
+        json_schema_extra={"tier": 1, "scope": "service"},
+    )
     queue_name: str = Field(default="oce:embed_queue", description="嵌入队列名称")
 
 
@@ -250,7 +290,7 @@ class WorkerSettings(BaseSettings):
         extra="ignore",
     )
 
-    enabled: bool = Field(default=True, description="是否启用后台 worker")
+    enabled: bool = Field(default=True, description="是否启用后台 worker", json_schema_extra={"tier": 2})
     concurrency: int = Field(default=2, ge=1, le=32, description="并发消费协程数")
     max_retries: int = Field(default=3, ge=1, le=10, description="失败重试上限")
 
@@ -265,7 +305,9 @@ class LogSettings(BaseSettings):
         extra="ignore",
     )
 
-    file_enabled: bool = Field(default=False, description="是否启用日志落盘")
+    file_enabled: bool = Field(
+        default=True, description="是否启用日志落盘", json_schema_extra={"tier": 2}
+    )
     file_path: str | None = Field(default=None, description="日志文件路径（None 时自动推断）")
     rotation: str = Field(default="100 MB", description="轮转策略：'1 day' 按天 / '100 MB' 按大小")
     retention: str = Field(default="30 days", description="保留时长：'30 days' / '10 files'")
@@ -283,7 +325,7 @@ class MonitoringSettings(BaseSettings):
         extra="ignore",
     )
 
-    enabled: bool = Field(default=True, description="是否启用监控采集与落库")
+    enabled: bool = Field(default=True, description="是否启用监控采集与落库", json_schema_extra={"tier": 2})
     flush_interval_seconds: float = Field(
         default=5.0, gt=0, description="缓冲区批量写库间隔秒数"
     )
@@ -303,7 +345,7 @@ class MonitoringSettings(BaseSettings):
         default=True, description="是否记录检索各阶段耗时与空回审计"
     )
     store_query_text: bool = Field(
-        default=False, description="检索审计是否存储 query 原文（默认关，隐私安全）"
+        default=True, description="检索审计是否存储 query 原文（默认开便于排查；隐私敏感部署应关闭）"
     )
 
 
@@ -321,14 +363,17 @@ class Settings(BaseSettings):
     api_key: str = Field(
         default="sk-opencontextengine",
         description="API 认证密钥；个人模式用与客户端约定的固定值，服务模式须改为强随机值",
+        json_schema_extra={"tier": 1},
     )
     admin_api_key: str = Field(
         default="",
         description="Admin 接口密钥；空则回落 API_KEY，一旦配置则 admin 接口只认此 key",
+        json_schema_extra={"tier": 1, "scope": "service"},
     )
     cors_origins: str = Field(
         default="https://oce-ai.github.io",
         description="允许访问 API 的浏览器来源，多个来源用逗号分隔；默认放行官方 admin 面板，设为空则关闭 CORS",
+        json_schema_extra={"tier": 2},
     )
 
     # 子配置组

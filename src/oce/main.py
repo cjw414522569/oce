@@ -107,10 +107,17 @@ async def version() -> dict[str, str]:
 # 门户静态挂载必须放在全部路由之后注册（Starlette 按注册顺序匹配，API 路径
 # 优先于 "/" 兜底）；dist 未构建时跳过挂载而不是启动失败。TaggedStaticFiles
 # 给 scope 打标记，监控中间件据此跳过静态资产。
+# GET /admin 精确返回门户页（管理控制台入口）；/admin/* API 路由先注册，不受影响。
 if auth_settings.enabled and auth_settings.portal_dist_dir:
     portal_dir = Path(auth_settings.portal_dist_dir)
     if portal_dir.is_dir():
+        from fastapi.responses import FileResponse
+
         from oce.api.middleware import TaggedStaticFiles
+
+        @app.get("/admin", include_in_schema=False)
+        async def admin_portal():
+            return FileResponse(portal_dir / "index.html")
 
         app.mount(
             "/", TaggedStaticFiles(directory=str(portal_dir), html=True), name="portal"

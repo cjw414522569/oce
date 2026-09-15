@@ -77,6 +77,11 @@ async def test_enabled_mounts_auth_router_and_portal(reload_main, tmp_path):
         # 门户静态挂载：/ 命中 index.html
         root = await client.get("/")
         assert root.status_code == 200 and "portal" in root.text
+        # /admin 精确路由返回同一门户页（管理控制台入口）
+        admin_page = await client.get("/admin")
+        assert admin_page.status_code == 200 and "portal" in admin_page.text
+        # /admin/* API 不受影响：无 key 401
+        assert (await client.get("/admin/users")).status_code == 401
         # API 路径优先于 "/" 兜底挂载
         assert (await client.get("/health")).status_code == 200
         assert (await client.get("/version")).status_code == 200

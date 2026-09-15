@@ -196,6 +196,35 @@ SiliconFlow 单次嵌入请求的 `input` 数组最多接受 32,000 字符。`ma
 打包产物、source map、lock 文件等非源码产物。被跳过的路径会作为空的 ready blob 持久化，
 避免客户端反复重传。项目清单和测试固件有显式豁免。
 
+## 多用户接入（LinuxDo OAuth2）
+
+服务模式可选开启多用户：成员用 [LinuxDo Connect](https://connect.linux.do) 登录门户，
+每人获得一把独立的 `sk-oce-*` 数据面 API key（可随时轮换，旧 key 立即失效），
+调用与 token 用量按用户归属统计；全局 `API_KEY` 保留为管理员通道。默认整体关闭，
+不配置任何 `AUTH_*` 时行为与单 key 模式完全一致。
+
+1. 在 <https://connect.linux.do/dash/sso> 申请新接入，回调地址填写
+   `https://<你的域名>/auth/callback`（必须逐字节一致），获得 client id/secret。
+2. 配置环境变量：
+
+```dotenv
+AUTH_ENABLED=true
+AUTH_CLIENT_ID=<client_id>
+AUTH_CLIENT_SECRET=<client_secret>
+AUTH_REDIRECT_BASE=https://<你的域名>
+AUTH_SESSION_SECRET=<openssl rand -hex 32>
+AUTH_COOKIE_SECURE=true          # TLS 反代后置 true；直连 http 调试保持 false
+# AUTH_MIN_TRUST_LEVEL=1         # 可选程序侧信任等级兜底；默认交给平台应用设置
+```
+
+3. 门户前端见独立工程 [oce-portal](https://github.com/oce-ai/oce-portal)（Vite +
+   React），`npm run build` 后把 `dist/` 只读挂载进容器并设置
+   `AUTH_PORTAL_DIST_DIR`，服务端会同源托管在 `/`（无需 CORS）。
+4. 运维面 `GET /admin/users` 可查看用户总览（身份、key 末 4 位、24h 用量）。
+
+用户 key 只存 SHA-256 哈希，明文仅签发/轮换时返回一次；会话为 HMAC 签名的
+HttpOnly cookie，无服务端 session 存储。
+
 ## 客户端与 MCP
 
 客户端负责扫描本地工作区、上传变更、维护 checkpoint，并调用服务端检索当前代码。它是

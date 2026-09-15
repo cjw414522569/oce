@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 
 from oce.shared.database.session import Base
@@ -255,10 +256,13 @@ class ApiCallMetricModel(Base):
     status_code = Column(Integer, nullable=False)
     latency_ms = Column(Integer, nullable=False)
     error_type = Column(String(64))
+    # 用户 key 请求归属（监控中间件从 request.scope 读取）；全局 key / 旧数据为 NULL
+    user_id = Column(Integer)
 
     __table_args__ = (
         Index("ix_api_call_metrics_ts", "ts"),
         Index("ix_api_call_metrics_endpoint", "endpoint"),
+        Index("ix_api_call_metrics_user_id", "user_id"),
     )
 
 
@@ -276,6 +280,9 @@ class TokenUsageMetricModel(Base):
     kind = Column(String(16), nullable=False)
     model = Column(String(128), nullable=False)
     credential_id = Column(Integer)
+    # 请求触发的调用归属到用户（verify_api_key 写入的上下文）；worker 后台嵌入与
+    # 超管（全局 API_KEY）路径为 NULL —— 与 credential_id 同为可空归属列先例
+    user_id = Column(Integer)
     prompt_tokens = Column(Integer, nullable=False, server_default="0")
     completion_tokens = Column(Integer, nullable=False, server_default="0")
     total_tokens = Column(Integer, nullable=False, server_default="0")
@@ -284,6 +291,7 @@ class TokenUsageMetricModel(Base):
         Index("ix_token_usage_metrics_ts", "ts"),
         Index("ix_token_usage_metrics_kind", "kind"),
         Index("ix_token_usage_metrics_credential_id", "credential_id"),
+        Index("ix_token_usage_metrics_user_id", "user_id"),
     )
 
 
@@ -339,4 +347,63 @@ class RetrievalMetricModel(Base):
         Index("ix_retrieval_metrics_ts", "ts"),
         Index("ix_retrieval_metrics_source", "source"),
         Index("ix_retrieval_metrics_hit_count", "hit_count"),
+    )
+
+
+class UserModel(Base):
+    """LinuxDo OAuth 用户。linuxdo_id 是提供方不可变标识，作为 upsert 键。
+
+    trust_level/active/silenced 只作展示与登录时校验存储，准入门槛默认交给
+    connect.linux.do 应用设置；status 是本地封禁位（active|disabled）。
+    """
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    linuxdo_id = Column(BigInteger, nullable=False)
+    username = Column(String(128), nullable=False)
+    name = Column(String(256))
+    avatar_template = Column(String(512))
+    trust_level = Column(Integer, nullable=False, server_default="0")
+    active = Column(Boolean, nullable=False, server_default="true")
+    silenced = Column(Boolean, nullable=False, server_default="false")
+    status = Column(String(16), nullable=False, server_default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_login_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("linuxdo_id", name="uq_users_linuxdo_id"),)
+
+
+class UserApiKeyModel(Base):
+    """用户数据面 API key。只存 sha256 哈希：校验按 key_hash 索引查找即可，
+    无需像 model_credentials 那样保留明文回放给上游。明文仅在签发/轮换时返回一次。
+
+    无盐 sha256 足够：key 是 ~256bit 随机串，不存在密码场景的字典攻击面。
+    单 active 不变式：rotate 在一个事务里吊销全部 active 再插入新行。
+    """
+
+    __tablename__ = "user_api_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    key_hash = Column(String(64), nullable=False)
+    key_last4 = Column(String(8), nullable=False)
+    status = Column(String(16), nullable=False, server_default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    revoked_at = Column(DateTime(timezone=True))
+    last_used_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("key_hash", name="uq_user_api_keys_key_hash"),
+        Index("ix_user_api_keys_user_id", "user_id"),
+        Index("ix_user_api_keys_status", "status"),
+        # 「单 active」不变式的数据库层兜底：同 user 至多一行 status='active'，
+        # 并发轮换靠它暴露冲突（store 捕获后重试）
+        Index(
+            "uq_user_api_keys_single_active",
+            "user_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
     )

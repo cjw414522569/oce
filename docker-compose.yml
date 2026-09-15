@@ -12,6 +12,13 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-oce_dev}@redis:6379/0
       MILVUS_ENDPOINT: http://milvus:19530
       WORKER_ENABLED: "${WORKER_ENABLED:-true}"
+      # 多用户门户静态资源（../oce-portal/dist，未启用 AUTH 时仅占用挂载点）
+      AUTH_PORTAL_DIST_DIR: /app/portal-dist
+    volumes:
+      - ../oce-portal/dist:/app/portal-dist:ro
+    # 宿主机上的 new-api 网关（3333）等本机服务经 host.docker.internal 访问
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn oce.main:app --host 0.0.0.0 --port 8986"]
     depends_on:
       postgres:
@@ -67,7 +74,9 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    # 原 pinned tag RELEASE.2024-05-28T17-19-04Z 已从 registry 拉取不到（镜像源未收录），
+    # 改用本机已有的 2025-09 版本；Milvus 只依赖其 S3 API。
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -93,7 +102,8 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
-      - "${MILVUS_PORT:-19530}:19530"
+      # Milvus 无内置鉴权，只绑定本机回环；app 经 compose 内部网络访问 milvus:19530
+      - "127.0.0.1:${MILVUS_PORT:-19530}:19530"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 15s

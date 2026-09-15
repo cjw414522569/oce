@@ -513,3 +513,58 @@ class GcResponse(BaseModel):
     skipped_inflight: int = 0
     deleted_chains: int = 0
     deleted_blobs: int = 0
+
+
+# ==================== 多用户接入（/auth + /admin/users）====================
+
+
+class AuthUserResponse(BaseModel):
+    id: int
+    username: str
+    name: str | None = None
+    avatar_template: str | None = None
+    trust_level: int = 0
+
+
+class AuthApiKeyResponse(BaseModel):
+    """掩码视图：明文只在签发/轮换响应中出现一次。"""
+
+    key_last4: str
+    status: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+
+class AuthUsageWindowResponse(BaseModel):
+    window_hours: int
+    api_calls: int = 0
+    total_tokens: int = 0
+
+
+class AuthMeResponse(BaseModel):
+    user: AuthUserResponse
+    api_key: AuthApiKeyResponse | None = None
+    usage_24h: AuthUsageWindowResponse
+    usage_7d: AuthUsageWindowResponse
+
+
+class RotateKeyResponse(BaseModel):
+    api_key: str
+    key_last4: str
+
+
+class AdminUserEntryResponse(BaseModel):
+    id: int
+    username: str
+    name: str | None = None
+    trust_level: int = 0
+    status: str
+    created_at: datetime
+    last_login_at: datetime | None = None
+    api_key_last4: str | None = None
+    api_calls_24h: int = 0
+    total_tokens_24h: int = 0
+
+
+class AdminUserListResponse(BaseModel):
+    users: list[AdminUserEntryResponse] = Field(default_factory=list)

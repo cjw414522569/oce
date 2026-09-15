@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -307,6 +307,84 @@ class MonitoringSettings(BaseSettings):
     )
 
 
+class AuthSettings(BaseSettings):
+    """多用户接入配置（LinuxDo OAuth2 + 每用户 API key）。
+
+    默认整体关闭：不配置任何 AUTH_* 时行为与单 key 模式逐字节一致（个人模式安全）。
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="AUTH_",
+        env_file=[".env", ".env.local"],
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    enabled: bool = Field(default=False, description="是否启用多用户接入")
+    client_id: str = Field(default="", description="LinuxDo Connect 应用 client_id")
+    client_secret: SecretStr = Field(default=SecretStr(""), description="LinuxDo Connect 应用 client_secret")
+    # redirect_uri 单一真源：authorize 与 token 请求及 connect.linux.do 注册必须逐字节一致
+    redirect_base: str = Field(
+        default="",
+        description="对外基地址（如 https://oce.melikeme.cn），回调 = base + /auth/callback",
+    )
+    redirect_uri_override: str | None = Field(
+        default=None, description="显式覆盖完整回调 URL（优先于 redirect_base）"
+    )
+    authorize_url: str = Field(
+        default="https://connect.linux.do/oauth2/authorize", description="OAuth2 授权端点"
+    )
+    token_url: str = Field(
+        default="https://connect.linux.do/oauth2/token", description="OAuth2 令牌端点"
+    )
+    userinfo_url: str = Field(
+        default="https://connect.linux.do/oauth2/userinfo",
+        description="用户信息端点（社区文档存在 /api/user 与 /oauth2/userinfo 两种，可覆盖）",
+    )
+    session_secret: SecretStr = Field(
+        default=SecretStr(""), description="会话 cookie 签名密钥；轮换会使全部会话失效"
+    )
+    session_ttl_seconds: int = Field(default=7 * 24 * 3600, gt=0, description="会话有效期")
+    state_ttl_seconds: int = Field(default=600, gt=0, description="OAuth state 有效期（秒）")
+    cookie_secure: bool = Field(
+        default=False,
+        description="会话 cookie 是否加 Secure；nginx TLS 后置 true（直连 http 会丢 cookie）",
+    )
+    min_trust_level: int | None = Field(
+        default=None,
+        description="可选信任等级门槛；None=不限制（准入交给 connect.linux.do 应用设置）",
+    )
+    portal_dist_dir: str = Field(
+        default="", description="门户前端构建产物目录（容器内如 /app/portal-dist）；空则不挂载"
+    )
+
+    @property
+    def redirect_uri(self) -> str:
+        if self.redirect_uri_override:
+            return self.redirect_uri_override
+        return self.redirect_base.rstrip("/") + "/auth/callback"
+
+    @model_validator(mode="after")
+    def _require_credentials_when_enabled(self) -> "AuthSettings":
+        # 启用即缺必填 → 启动期失败，而不是第一次登录才发现
+        if self.enabled:
+            missing = [
+                name
+                for name, value in (
+                    ("AUTH_CLIENT_ID", self.client_id),
+                    ("AUTH_CLIENT_SECRET", self.client_secret.get_secret_value()),
+                    ("AUTH_SESSION_SECRET", self.session_secret.get_secret_value()),
+                    # 校验源头而非派生的 redirect_uri：base 为空时派生值 "/auth/callback"
+                    # 非空但无意义
+                    ("AUTH_REDIRECT_BASE 或 AUTH_REDIRECT_URI", self.redirect_uri_override or self.redirect_base),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(f"AUTH_ENABLED=true 但缺少必填配置: {', '.join(missing)}")
+        return self
+
+
 class Settings(BaseSettings):
     """全局配置 - 聚合所有配置组"""
 
@@ -342,6 +420,7 @@ class Settings(BaseSettings):
     worker: WorkerSettings = Field(default_factory=WorkerSettings)
     log: LogSettings = Field(default_factory=LogSettings)
     monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
 
 @lru_cache
 def get_settings() -> Settings:

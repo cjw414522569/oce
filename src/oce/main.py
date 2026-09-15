@@ -74,6 +74,13 @@ if cors_origins:
 app.include_router(router)
 app.include_router(admin_router)
 
+# 多用户接入：仅 AUTH_ENABLED 时挂载 /auth 路由
+auth_settings = get_settings().auth
+if auth_settings.enabled:
+    from oce.api.auth_router import auth_router
+
+    app.include_router(auth_router)
+
 
 def _metrics_sink_provider():
     """仅在容器已装配后返回 sink；未装配（如未跑 lifespan）时返回 None 跳过，避免误构建容器。"""
@@ -95,3 +102,16 @@ async def health() -> dict[str, str]:
 async def version() -> dict[str, str]:
     """服务端版本号，公开无需鉴权，供客户端做兼容性检查与升级提醒。"""
     return {"name": "oce", "version": __version__}
+
+
+# 门户静态挂载必须放在全部路由之后注册（Starlette 按注册顺序匹配，API 路径
+# 优先于 "/" 兜底）；dist 未构建时跳过挂载而不是启动失败。TaggedStaticFiles
+# 给 scope 打标记，监控中间件据此跳过静态资产。
+if auth_settings.enabled and auth_settings.portal_dist_dir:
+    portal_dir = Path(auth_settings.portal_dist_dir)
+    if portal_dir.is_dir():
+        from oce.api.middleware import TaggedStaticFiles
+
+        app.mount(
+            "/", TaggedStaticFiles(directory=str(portal_dir), html=True), name="portal"
+        )

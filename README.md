@@ -219,6 +219,38 @@ non-source artifacts such as SVG, media, archives, minified bundles, source maps
 files before chunking. Skipped paths are persisted as empty ready blobs so clients do not
 re-upload them indefinitely. Project manifests and test fixtures have explicit exemptions.
 
+## Multi-user access (LinuxDo OAuth2)
+
+Service mode can optionally enable multi-user access: members sign in to the portal
+via [LinuxDo Connect](https://connect.linux.do) and each receives a personal
+`sk-oce-*` data-plane API key (rotatable; old keys stop working immediately). API
+calls and token usage are attributed per user. The global `API_KEY` remains the
+administrator path. Everything is off by default — with no `AUTH_*` set, behavior is
+byte-identical to single-key mode.
+
+1. Register an app at <https://connect.linux.do/dash/sso> with the callback URL
+   `https://<your-domain>/auth/callback` (byte-exact match required).
+2. Configure:
+
+```dotenv
+AUTH_ENABLED=true
+AUTH_CLIENT_ID=<client_id>
+AUTH_CLIENT_SECRET=<client_secret>
+AUTH_REDIRECT_BASE=https://<your-domain>
+AUTH_SESSION_SECRET=<openssl rand -hex 32>
+AUTH_COOKIE_SECURE=true          # true behind a TLS proxy; false for plain http
+# AUTH_MIN_TRUST_LEVEL=1         # optional server-side trust gate (off by default)
+```
+
+3. The portal frontend is a separate Vite + React project
+   ([oce-portal](https://github.com/oce-ai/oce-portal)); build it with
+   `npm run build`, mount `dist/` read-only into the container and point
+   `AUTH_PORTAL_DIST_DIR` at it — the server serves it same-origin at `/` (no CORS).
+4. `GET /admin/users` lists users with masked keys and 24h usage for operators.
+
+User keys are stored as SHA-256 hashes only; plaintext is returned exactly once on
+issue/rotation. Sessions are HMAC-signed HttpOnly cookies — no server-side storage.
+
 ## Client and MCP
 
 The client scans a local workspace, uploads changes, maintains checkpoints, and retrieves

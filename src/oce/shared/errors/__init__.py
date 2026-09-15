@@ -75,3 +75,23 @@ class ScopeRequiredError(ApplicationError):
             reason or "检索必须声明工作集：提供 checkpoint_id 或 added_blobs",
             code="SCOPE_REQUIRED",
         )
+
+
+class LoginDeniedError(ApplicationError):
+    """登录被拒：提供商标记 inactive/silenced、本地 status 被禁或可选信任等级门槛未过。"""
+
+    def __init__(self, reason: str | None = None) -> None:
+        super().__init__(
+            reason or "登录被拒绝",
+            code="LOGIN_DENIED",
+        )
+
+
+class OAuthExchangeError(ApplicationError):
+    """OAuth code 换 token / 拉取 userinfo 失败（上游网络或协议问题，非用户被拒）。"""
+
+    def __init__(self, reason: str | None = None) -> None:
+        super().__init__(
+            reason or "OAuth 授权交换失败",
+            code="OAUTH_EXCHANGE_FAILED",
+        )

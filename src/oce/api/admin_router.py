@@ -8,6 +8,8 @@ from oce.api.router import get_application
 from oce.api.schemas import (
     ApiCallStatsResponse,
     ApiCallsReportResponse,
+    AdminUserEntryResponse,
+    AdminUserListResponse,
     CredentialCreateRequest,
     CredentialDuplicateRequest,
     CredentialListResponse,
@@ -63,6 +65,31 @@ async def list_credentials(
     records = await application.list_credentials()
     return CredentialListResponse(
         credentials=[_credential_response(record) for record in records]
+    )
+
+
+@admin_router.get("/users", response_model=AdminUserListResponse)
+async def list_users(
+    application: RetrievalApplication = Depends(get_application),
+) -> AdminUserListResponse:
+    """多用户总览：身份 + active key 末 4 位 + 24h 用量，供运维排查滥用。"""
+    overviews = await application.list_users()
+    return AdminUserListResponse(
+        users=[
+            AdminUserEntryResponse(
+                id=o.user.id,
+                username=o.user.username,
+                name=o.user.name,
+                trust_level=o.user.trust_level,
+                status=o.user.status,
+                created_at=o.user.created_at,
+                last_login_at=o.user.last_login_at,
+                api_key_last4=o.api_key_last4,
+                api_calls_24h=o.api_calls_24h,
+                total_tokens_24h=o.total_tokens_24h,
+            )
+            for o in overviews
+        ]
     )
 
 

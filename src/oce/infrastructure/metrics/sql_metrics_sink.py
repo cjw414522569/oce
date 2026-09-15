@@ -99,6 +99,7 @@ class SqlMetricsSink:
                     status_code=r.status_code,
                     latency_ms=r.latency_ms,
                     error_type=r.error_type,
+                    user_id=r.user_id,
                 )
             )
         while self._token:
@@ -109,6 +110,7 @@ class SqlMetricsSink:
                     kind=r.kind,
                     model=r.model,
                     credential_id=r.credential_id,
+                    user_id=r.user_id,
                     prompt_tokens=r.prompt_tokens,
                     completion_tokens=r.completion_tokens,
                     total_tokens=r.total_tokens,

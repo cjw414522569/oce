@@ -31,6 +31,7 @@ from oce.application.credential_admin import (
     ListCredentialsQuery,
     UpdateCredentialCommand,
 )
+from oce.application.user_access import AdminUserOverview, ListUsersQuery
 from oce.application.queries.queue import QueueStatusQuery, QueueStatusResult
 from oce.application.queries.reports import (
     ApiCallsReportQuery,
@@ -261,6 +262,9 @@ class RetrievalApplication:
 
     async def list_credentials(self) -> list[CredentialRecord]:
         return await self._queries.ask(ListCredentialsQuery())
+
+    async def list_users(self) -> tuple[AdminUserOverview, ...]:
+        return await self._queries.ask(ListUsersQuery())
 
     async def create_credential(self, data: CredentialCreate) -> CredentialRecord:
         return await self._commands.execute(CreateCredentialCommand(data))

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
 from oce.api.middleware import ApiCallMetricsMiddleware
 from oce.shared.metrics import ApiCallRecord
@@ -93,3 +93,55 @@ async def test_none_sink_provider_skips_silently():
         resp = await client.get("/items/1")
 
     assert resp.status_code == 200  # provider 返回 None：不记账也不报错
+
+
+async def test_user_id_taken_from_scope_dict():
+    # 身份由依赖写入 scope（BaseHTTPMiddleware 跨任务可见），中间件负责透传
+    sink = _RecordingSink()
+
+    def provider():
+        return sink
+
+    app = _build_app(provider)
+
+    @app.get("/who")
+    async def who(request: Request):
+        request.scope["oce_user_id"] = 42
+        return {"ok": True}
+
+    async with _client(app) as client:
+        resp = await client.get("/who")
+    assert resp.status_code == 200
+    rec = sink.calls[-1]
+    assert rec.user_id == 42
+
+
+async def test_auth_prefix_exempt_from_metrics():
+    sink = _RecordingSink()
+    app = _build_app(lambda: sink)
+
+    @app.get("/auth/login")
+    async def auth_login():
+        return {"ok": True}
+
+    async with _client(app) as client:
+        resp = await client.get("/auth/login")
+    assert resp.status_code == 200
+    assert sink.calls == []
+
+
+async def test_tagged_static_requests_skipped(tmp_path):
+    # Mount.matches 不设置 scope["route"]，靠 TaggedStaticFiles 打标跳过
+    import os
+
+    from oce.api.middleware import TaggedStaticFiles
+
+    (tmp_path / "index.html").write_text("<html>x</html>")
+    sink = _RecordingSink()
+    app = _build_app(lambda: sink)
+    app.mount("/", TaggedStaticFiles(directory=str(tmp_path), html=True), name="portal")
+
+    async with _client(app) as client:
+        assert (await client.get("/")).status_code == 200
+
+    assert sink.calls == []

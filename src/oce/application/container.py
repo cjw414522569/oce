@@ -45,6 +45,11 @@ from oce.application.credential_admin import (
     UpdateCredentialCommand,
     UpdateCredentialCommandHandler,
 )
+from oce.application.user_access import (
+    ListUsersQuery,
+    ListUsersQueryHandler,
+    UserAccessService,
+)
 from oce.application.queries.queue import (
     QueueStatusQuery,
     QueueStatusQueryHandler,
@@ -92,6 +97,8 @@ from oce.infrastructure.milvus3.path_index import PathIndexClient
 from oce.infrastructure.persistence.credential_admin_store import (
     SqlCredentialAdminStore,
 )
+from oce.infrastructure.persistence.user_access_store import SqlUserAccessStore
+from oce.infrastructure.oauth.linuxdo import LinuxDoOAuthClient
 from oce.infrastructure.persistence.symbol_search_store import SymbolSearchStore
 from oce.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
 from oce.infrastructure.metrics.cleanup import MonitoringCleaner
@@ -107,6 +114,7 @@ from oce.shared.config import get_settings
 from oce.shared.database.session import async_session_factory
 from oce.shared.logging import DATA_DIR_ENV
 from oce.shared.metrics import NoopMetricsSink, TokenUsageRecord
+from oce.shared.user_context import get_current_user_id
 from oce.shared.reports_read import VectorCollectionStat, VectorStoreStat
 
 
@@ -485,6 +493,19 @@ class Container:
             ListCredentialsQuery,
             ListCredentialsQueryHandler(credential_admin_store),
         )
+
+        # 多用户接入：store 常驻装配（verify_api_key 按需使用），provider 仅在
+        # AUTH_ENABLED 时创建；关闭时 /auth 路由不挂载，service 不会被调用
+        user_access_store = SqlUserAccessStore(async_session_factory)
+        self.user_access = UserAccessService(
+            store=user_access_store,
+            provider=LinuxDoOAuthClient(settings.auth) if settings.auth.enabled else None,
+            min_trust_level=settings.auth.min_trust_level,
+        )
+        query_bus.register(
+            ListUsersQuery,
+            ListUsersQueryHandler(self.user_access),
+        )
         query_bus.register(
             QueueStatusQuery,
             QueueStatusQueryHandler(self._uow_factory, self.queue),
@@ -509,7 +530,8 @@ class Container:
         """把 embedder/reranker/llm 的真实用量桥接到 sink。
 
         credential_id=0（无凭证，如 LLM）归一为 None；旁路容错：任何异常只记日志，
-        绝不抛回主链路。
+        绝不抛回主链路。user_id 取请求上下文（verify_api_key 写入的 ContextVar，
+        同任务内可读）；worker 后台嵌入等无请求路径为 None。
         """
         try:
             self.metrics.record_token_usage(
@@ -520,6 +542,7 @@ class Container:
                     completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     credential_id=credential_id or None,
+                    user_id=get_current_user_id(),
                 )
             )
         except Exception as exc:  # 监控旁路：绝不影响主链路

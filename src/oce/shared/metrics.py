@@ -27,6 +27,7 @@ class ApiCallRecord:
     status_code: int
     latency_ms: int
     error_type: str | None = None
+    user_id: int | None = None
     ts: datetime = field(default_factory=_now)
 
 
@@ -38,6 +39,7 @@ class TokenUsageRecord:
     completion_tokens: int = 0
     total_tokens: int = 0
     credential_id: int | None = None
+    user_id: int | None = None
     ts: datetime = field(default_factory=_now)
 
 

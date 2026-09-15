@@ -1,7 +1,7 @@
 """多用户接入的应用层：端口、读模型与编排服务。
 
 用户身份来自 LinuxDo OAuth2（connect.linux.do），数据面鉴权用每用户独立
-sk-oce-* key（只存 sha256，明文仅签发/轮换时返回一次）。与 credential_admin
+sk-oce-* key（hash 索引校验 + 明文持久化供门户常显）。与 credential_admin
 同款分层：本文件只定义 Protocol 端口与编排，SQL 实现在 infrastructure。
 """
 
@@ -43,17 +43,19 @@ class UserRecord:
 
 @dataclass(frozen=True)
 class UserApiKeyView:
-    """掩码视图：不含明文 key，仅末 4 位。"""
+    """key 视图。api_key 为明文（运维选择门户常显）；存量行可能为 None——
+    此时仅展示末 4 位，轮换一次后即有明文。"""
 
     key_last4: str
     status: str
     created_at: datetime
     last_used_at: datetime | None
+    api_key: str | None = None
 
 
 @dataclass(frozen=True)
 class IssuedApiKey:
-    """签发/轮换的一次性返回：明文只出现这一次。"""
+    """签发/轮换的返回；key 同时持久化，门户可随时查看。"""
 
     api_key: str
     key_last4: str

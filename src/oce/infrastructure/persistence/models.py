@@ -375,11 +375,12 @@ class UserModel(Base):
 
 
 class UserApiKeyModel(Base):
-    """用户数据面 API key。只存 sha256 哈希：校验按 key_hash 索引查找即可，
-    无需像 model_credentials 那样保留明文回放给上游。明文仅在签发/轮换时返回一次。
+    """用户数据面 API key。
 
-    无盐 sha256 足够：key 是 ~256bit 随机串，不存在密码场景的字典攻击面。
-    单 active 不变式：rotate 在一个事务里吊销全部 active 再插入新行。
+    key_hash 是校验索引（verify_api_key 按 hash 查找）。key_plaintext 为运维
+    选择的「门户常显」能力而存（与 model_credentials 回放明文同等安全姿态：
+    DB 可读即 key 可见）；存量行可能为 NULL——轮换一次后即有。单 active 不变式
+    由部分唯一索引在 DB 层兜底，rotate 在一个事务里吊销全部 active 再插入新行。
     """
 
     __tablename__ = "user_api_keys"
@@ -387,6 +388,7 @@ class UserApiKeyModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     key_hash = Column(String(64), nullable=False)
+    key_plaintext = Column(String(256))
     key_last4 = Column(String(8), nullable=False)
     status = Column(String(16), nullable=False, server_default="active")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

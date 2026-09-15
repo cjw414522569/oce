@@ -67,6 +67,7 @@ class StubService:
                     status="active",
                     created_at=datetime.now(timezone.utc),
                     last_used_at=None,
+                    api_key="sk-oce-full-key-abcd",
                 ),
                 usage_24h=UserUsageSummary(24, api_calls=3, total_tokens=150),
                 usage_7d=UserUsageSummary(168, api_calls=9, total_tokens=450),
@@ -151,6 +152,7 @@ async def test_callback_happy_path_issues_session(client):
     body = me.json()
     assert body["user"]["username"] == "alice"
     assert body["api_key"]["key_last4"] == "abcd"
+    assert body["api_key"]["api_key"] == "sk-oce-full-key-abcd"
     assert body["usage_24h"]["api_calls"] == 3
 
 

@@ -527,12 +527,13 @@ class AuthUserResponse(BaseModel):
 
 
 class AuthApiKeyResponse(BaseModel):
-    """掩码视图：明文只在签发/轮换响应中出现一次。"""
+    """key 视图；api_key 为明文（存量行轮换前可能为 None）。"""
 
     key_last4: str
     status: str
     created_at: datetime
     last_used_at: datetime | None = None
+    api_key: str | None = None
 
 
 class AuthUsageWindowResponse(BaseModel):

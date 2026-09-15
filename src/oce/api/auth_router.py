@@ -162,6 +162,7 @@ def _me_response(view: PortalView) -> AuthMeResponse:
             status=api_key.status,
             created_at=api_key.created_at,
             last_used_at=api_key.last_used_at,
+            api_key=api_key.api_key,
         )
         if api_key is not None
         else None,

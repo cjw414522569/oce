@@ -64,6 +64,7 @@ async def test_rotate_revokes_old_and_issues_new():
 
         view = await store.get_active_api_key(user.id)
         assert view is not None and view.key_last4 == issued.key_last4
+        assert view.api_key == issued.api_key  # 明文持久化（门户常显）
 
         # 轮换后旧 key 不再可解析（单 active 不变式）
         assert await store.resolve_api_key(hash_api_key(issued.api_key)) is not None

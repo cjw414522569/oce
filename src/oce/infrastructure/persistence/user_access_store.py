@@ -1,7 +1,8 @@
 """用户与 API key 的 SQL 实现（UserAccessStore 端口）。
 
-用户 key 只存 sha256（校验按 hash 索引查找，无明文回放需求）；用量查询走
-api_call_metrics / token_usage_metrics，与 stats_store 同样只用可移植 SQL。
+用户 key 校验按 hash 索引查找；明文持久化（运维选择的门户常显能力，与
+model_credentials 回放明文同等安全姿态）。用量查询走 api_call_metrics /
+token_usage_metrics，与 stats_store 同样只用可移植 SQL。
 """
 
 from __future__ import annotations
@@ -63,6 +64,7 @@ def _key_view(model: UserApiKeyModel) -> UserApiKeyView:
         status=model.status,
         created_at=model.created_at,
         last_used_at=model.last_used_at,
+        api_key=model.key_plaintext,
     )
 
 
@@ -179,6 +181,7 @@ class SqlUserAccessStore:
         return UserApiKeyModel(
             user_id=user_id,
             key_hash=hash_api_key(api_key),
+            key_plaintext=api_key,
             key_last4=api_key[-4:],
             status="active",
         )

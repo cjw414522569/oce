@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
-from oce.application.messages import Query
+from oce.application.messages import Command, Query
 from oce.shared.errors import LoginDeniedError
 
 
@@ -108,6 +108,8 @@ class UserAccessStore(Protocol):
 
     async def get_user(self, user_id: int) -> UserRecord | None: ...
 
+    async def set_user_status(self, user_id: int, status: str) -> UserRecord | None: ...
+
     async def get_active_api_key(self, user_id: int) -> UserApiKeyView | None: ...
 
     async def rotate_api_key(self, user_id: int) -> IssuedApiKey: ...
@@ -191,3 +193,24 @@ class ListUsersQueryHandler:
 
     async def handle(self, query: ListUsersQuery) -> tuple[AdminUserOverview, ...]:
         return await self._service.store.list_users_with_usage(query.window_hours)
+
+
+@dataclass(frozen=True)
+class SetUserStatusCommand(Command):
+    user_id: int
+    status: str  # active | disabled
+
+
+class SetUserStatusCommandHandler:
+    """本地封禁/解封（/admin/users/{id} PATCH）。封禁即时切断数据面（resolve JOIN）。"""
+
+    def __init__(self, store: UserAccessStore) -> None:
+        self._store = store
+
+    async def handle(self, command: SetUserStatusCommand) -> UserRecord:
+        if command.status not in ("active", "disabled"):
+            raise ValueError("status 只允许 active | disabled")
+        record = await self._store.set_user_status(command.user_id, command.status)
+        if record is None:
+            raise LookupError("user not found")
+        return record

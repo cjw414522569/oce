@@ -569,3 +569,7 @@ class AdminUserEntryResponse(BaseModel):
 
 class AdminUserListResponse(BaseModel):
     users: list[AdminUserEntryResponse] = Field(default_factory=list)
+
+
+class AdminUserStatusRequest(BaseModel):
+    status: Literal["active", "disabled"]

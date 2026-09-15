@@ -130,6 +130,16 @@ class SqlUserAccessStore:
             model = await session.get(UserModel, user_id)
             return _user_record(model) if model is not None else None
 
+    async def set_user_status(self, user_id: int, status: str) -> UserRecord | None:
+        async with self._session_factory() as session:
+            model = await session.get(UserModel, user_id)
+            if model is None:
+                return None
+            model.status = status
+            await session.commit()
+            await session.refresh(model)
+            return _user_record(model)
+
     async def get_active_api_key(self, user_id: int) -> UserApiKeyView | None:
         async with self._session_factory() as session:
             model = (

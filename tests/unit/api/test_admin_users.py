@@ -78,3 +78,44 @@ async def test_lists_users_with_usage(client):
 async def test_admin_key_required(client):
     resp = await client.get("/admin/users", headers={"Authorization": "Bearer wrong"})
     assert resp.status_code == 401
+
+
+async def test_patch_user_status_updates_row(client, monkeypatch):
+    from oce.application.user_access import UserRecord
+
+    record_holder = {}
+
+    class _PatchApp(StubApplication):
+        async def set_user_status(self, user_id: int, status: str) -> UserRecord:
+            record_holder["called"] = (user_id, status)
+            return _overview("alice").user.__class__(
+                id=user_id,
+                linuxdo_id=1001,
+                username="alice",
+                name="Alice",
+                avatar_template=None,
+                trust_level=2,
+                status=status,
+                created_at=_overview("alice").user.created_at,
+                last_login_at=None,
+            )
+
+    app = client._transport.app  # noqa: SLF001
+    app.dependency_overrides[get_application] = lambda: _PatchApp()
+    resp = await client.patch(
+        "/admin/users/1",
+        json={"status": "disabled"},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "disabled"
+    assert record_holder["called"] == (1, "disabled")
+
+
+async def test_patch_user_status_invalid_rejected(client):
+    resp = await client.patch(
+        "/admin/users/1",
+        json={"status": "banned"},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert resp.status_code == 422  # Literal 校验

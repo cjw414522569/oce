@@ -48,6 +48,8 @@ from oce.application.credential_admin import (
 from oce.application.user_access import (
     ListUsersQuery,
     ListUsersQueryHandler,
+    SetUserStatusCommand,
+    SetUserStatusCommandHandler,
     UserAccessService,
 )
 from oce.application.queries.queue import (
@@ -505,6 +507,10 @@ class Container:
         query_bus.register(
             ListUsersQuery,
             ListUsersQueryHandler(self.user_access),
+        )
+        command_bus.register(
+            SetUserStatusCommand,
+            SetUserStatusCommandHandler(user_access_store),
         )
         query_bus.register(
             QueueStatusQuery,

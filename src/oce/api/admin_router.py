@@ -10,6 +10,7 @@ from oce.api.schemas import (
     ApiCallsReportResponse,
     AdminUserEntryResponse,
     AdminUserListResponse,
+    AdminUserStatusRequest,
     CredentialCreateRequest,
     CredentialDuplicateRequest,
     CredentialListResponse,
@@ -90,6 +91,28 @@ async def list_users(
             )
             for o in overviews
         ]
+    )
+
+
+@admin_router.patch("/users/{user_id}", response_model=AdminUserEntryResponse)
+async def set_user_status(
+    user_id: int,
+    request: AdminUserStatusRequest,
+    application: RetrievalApplication = Depends(get_application),
+) -> AdminUserEntryResponse:
+    """本地封禁/解封；封禁即时切断该用户全部数据面访问与门户会话功能。"""
+    try:
+        record = await application.set_user_status(user_id, request.status)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AdminUserEntryResponse(
+        id=record.id,
+        username=record.username,
+        name=record.name,
+        trust_level=record.trust_level,
+        status=record.status,
+        created_at=record.created_at,
+        last_login_at=record.last_login_at,
     )
 
 

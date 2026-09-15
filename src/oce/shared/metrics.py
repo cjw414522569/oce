@@ -16,6 +16,11 @@ from time import perf_counter
 from typing import Protocol
 
 
+# 客户端同步机制的轮询端点：计入全局指标（admin 报表可见），但不算进
+# 个人用量（否则一次 sync 显示数百次"调用"，口径失真）
+POLLING_ENDPOINTS = ("/agents/blob-status", "/find-missing")
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 

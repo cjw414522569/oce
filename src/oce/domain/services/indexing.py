@@ -26,6 +26,7 @@ from oce.domain.services.path_search import PathSearchStore
 from oce.domain.services.search import VectorIndex
 from oce.domain.services.source_filter import is_binary_source, is_ignored_source_path
 from oce.shared.events import DomainEvent, EventBus
+from oce.shared.user_context import get_current_user_id
 from oce.domain.repositories import BlobRepository, ChunkRepository
 
 EVENT_BLOB_CREATED = "blob.created"
@@ -91,7 +92,8 @@ class IndexingPipeline:
             await self.blob_repo.save(existing)
             return 0  # 异步模式:不返回 chunk_count,客户端轮询
 
-        # 只写元数据,不切块
+        # 只写元数据,不切块。uploaded_by 取请求上下文：worker 嵌入时据此把
+        # token 用量归属到上传者（异步脱离请求后 ContextVar 已不可用）
         blob = Blob(
             blob_name=blob_name,
             path=path,
@@ -100,6 +102,7 @@ class IndexingPipeline:
             content_size=len(content.encode("utf-8")),
             language=detect_language(path),
             file_type="text",
+            uploaded_by=get_current_user_id(),
         )
         await self.blob_repo.save(blob)
 

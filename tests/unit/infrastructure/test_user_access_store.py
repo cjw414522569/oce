@@ -138,6 +138,17 @@ async def test_usage_summary_and_admin_listing():
                     user_id=None,  # 超管/旧数据：不计入任何用户
                 )
             )
+            # 客户端轮询：不计入个人用量
+            for _ in range(5):
+                session.add(
+                    ApiCallMetricModel(
+                        endpoint="/agents/blob-status",
+                        method="POST",
+                        status_code=200,
+                        latency_ms=3,
+                        user_id=user.id,
+                    )
+                )
             session.add(
                 TokenUsageMetricModel(
                     kind="embed",
@@ -149,6 +160,7 @@ async def test_usage_summary_and_admin_listing():
             await session.commit()
 
         summary = await store.usage_summary(user.id, 24)
+        # 轮询 5 次被排除：只数 1 次真实调用
         assert summary.api_calls == 1 and summary.total_tokens == 100
 
         overviews = await store.list_users_with_usage(24)

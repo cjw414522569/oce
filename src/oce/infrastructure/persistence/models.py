@@ -92,6 +92,8 @@ class BlobModel(Base):
 
     blob_name = Column(String(64), primary_key=True)
     path = Column(String(1024), nullable=False)
+    # 上传者（worker 嵌入时恢复其用户上下文，token 用量归属到人）；用户删除后置空
+    uploaded_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     content_size = Column(Integer, nullable=False)
     language = Column(String(32))
     file_type = Column(String(16), nullable=False, default="text")
@@ -103,6 +105,7 @@ class BlobModel(Base):
 
     __table_args__ = (
         Index("ix_blobs_status", "status"),
+        Index("ix_blobs_uploaded_by", "uploaded_by"),
         Index("ix_blobs_last_seen", "last_seen"),
         Index("ix_blobs_language", "language"),
         Index("ix_blobs_retry_count", "retry_count"),

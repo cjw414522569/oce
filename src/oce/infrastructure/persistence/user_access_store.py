@@ -33,6 +33,7 @@ from oce.infrastructure.persistence.models import (
     UserModel,
 )
 from oce.shared.key_hash import hash_api_key
+from oce.shared.metrics import POLLING_ENDPOINTS
 
 _KEY_PREFIX = "sk-oce-"
 # touch 节流窗口：数据面每次请求都 resolve key，last_used_at 每次都 UPDATE 会放大写压
@@ -331,6 +332,7 @@ class SqlUserAccessStore:
                     .where(
                         ApiCallMetricModel.ts >= cutoff,
                         ApiCallMetricModel.user_id == user_id,
+                        ApiCallMetricModel.endpoint.notin_(POLLING_ENDPOINTS),
                     )
                 )
             ).scalar_one()
@@ -378,6 +380,7 @@ class SqlUserAccessStore:
                         .where(
                             ApiCallMetricModel.ts >= cutoff,
                             ApiCallMetricModel.user_id.is_not(None),
+                            ApiCallMetricModel.endpoint.notin_(POLLING_ENDPOINTS),
                         )
                         .group_by(ApiCallMetricModel.user_id)
                     )

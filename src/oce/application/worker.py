@@ -114,14 +114,28 @@ class EmbedWorker:
                 continue
 
             try:
-                # embed_pending 内部会从 staging 取原文切块(如需),然后嵌入、删 staging
+                # 恢复上传者上下文：本消息的嵌入 token 用量据此归属到人
+                # （_record_token_usage 读 ContextVar）；旧 blob 无上传者保持 None
+                from oce.shared.user_context import (
+                    reset_current_user_id,
+                    set_current_user_id,
+                )
+
                 async with self._uow_factory() as uow:
-                    pipeline = self._build_pipeline(uow)
-                    n = await pipeline.embed_pending(
-                        [blob_name],
-                        mark_failures=False,
-                    )
-                    await uow.commit()
+                    meta = await uow.blobs.get(blob_name)
+                context_token = set_current_user_id(
+                    meta.uploaded_by if meta is not None else None
+                )
+                try:
+                    async with self._uow_factory() as uow:
+                        pipeline = self._build_pipeline(uow)
+                        n = await pipeline.embed_pending(
+                            [blob_name],
+                            mark_failures=False,
+                        )
+                        await uow.commit()
+                finally:
+                    reset_current_user_id(context_token)
 
                 await self._queue.ack(blob_name)
                 logger.debug("worker#{} processed blob {} ({} chunks embed)", worker_id, blob_name[:12], n)

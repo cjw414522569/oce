@@ -148,3 +148,42 @@ async def test_batch_upload_without_checkpoint_id_skips_checkpoint():
     await application.batch_upload([BlobUpload("src/a.py", "print(1)\n")])
 
     assert not any(isinstance(c, CheckpointCommand) for c in commands.commands)
+
+
+async def test_ingest_records_uploader(monkeypatch):
+    """ingest 在请求上下文内运行时，新 blob 记录 uploaded_by（worker 据此归属 token）。"""
+    from oce.domain.services.indexing import IndexingPipeline
+    from oce.shared.user_context import set_current_user_id
+
+    class _BlobRepo:
+        def __init__(self):
+            self.saved = []
+
+        async def get(self, name):
+            return None
+
+        async def save(self, blob):
+            self.saved.append(blob)
+
+        async def save_staging(self, name, content):
+            pass
+
+    class _EventBus:
+        async def publish(self, event):
+            pass
+
+    repo = _BlobRepo()
+    pipeline = IndexingPipeline(
+        chunker=None,
+        embedder=None,
+        vector_index=None,
+        blob_repo=repo,
+        chunk_repo=None,
+        event_bus=_EventBus(),
+    )
+    token = set_current_user_id(42)
+    try:
+        await pipeline.ingest("a" * 64, "src/x.py", "print('hi')")
+    finally:
+        set_current_user_id(token)
+    assert repo.saved[0].uploaded_by == 42

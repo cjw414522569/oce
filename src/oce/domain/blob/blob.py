@@ -44,7 +44,8 @@ class Blob:
     retry_count: int = 0                # 失败重试次数
     last_seen: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    error_message: str | None = None    # 失败原因
+    error_message: str | None = None
+    uploaded_by: int | None = None    # 失败原因
     
     def __post_init__(self):
         """验证不变量"""

@@ -88,6 +88,7 @@ class SqlBlobRepository(BlobRepository):
                 "last_seen": blob.last_seen,
                 "created_at": blob.created_at,
                 "error_message": blob.error_message,
+                "uploaded_by": blob.uploaded_by,
             }
             for blob in blobs
         ]
@@ -95,6 +96,7 @@ class SqlBlobRepository(BlobRepository):
         stmt = stmt.on_conflict_do_update(
             index_elements=["blob_name"],
             set_={
+                "uploaded_by": stmt.excluded.uploaded_by,
                 "path": stmt.excluded.path,
                 "content_size": stmt.excluded.content_size,
                 "language": stmt.excluded.language,
@@ -343,4 +345,5 @@ class SqlBlobRepository(BlobRepository):
             last_seen=row.last_seen,
             created_at=row.created_at,
             error_message=row.error_message,
+            uploaded_by=row.uploaded_by,
         )

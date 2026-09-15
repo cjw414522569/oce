@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from oce.application.user_access import (
 )
 from oce.infrastructure.persistence.models import (
     ApiCallMetricModel,
+    AppSettingModel,
     TokenUsageMetricModel,
     UserApiKeyModel,
     UserModel,
@@ -139,6 +140,91 @@ class SqlUserAccessStore:
             await session.commit()
             await session.refresh(model)
             return _user_record(model)
+
+    async def get_user_by_linuxdo(self, linuxdo_id: int) -> UserRecord | None:
+        async with self._session_factory() as session:
+            model = (
+                (
+                    await session.execute(
+                        select(UserModel).where(UserModel.linuxdo_id == linuxdo_id)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            return _user_record(model) if model is not None else None
+
+    async def count_users(self) -> int:
+        async with self._session_factory() as session:
+            return int(
+                (await session.execute(select(func.count()).select_from(UserModel))).scalar_one()
+            )
+
+    async def delete_users_by_ids(self, user_ids: list[int]) -> tuple[int, ...]:
+        """级联删除 key（FK ondelete CASCADE）；返回实际删除的 id（不含不存在者）。"""
+        if not user_ids:
+            return ()
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(UserModel.id).where(UserModel.id.in_(user_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not rows:
+                return ()
+            await session.execute(
+                delete(UserModel).where(UserModel.id.in_(rows))
+            )
+            await session.commit()
+            return tuple(rows)
+
+    async def user_ids_registered_between(
+        self, date_from: str, date_to: str
+    ) -> list[int]:
+        """注册日落在 [date_from, date_to]（闭区间，UTC）的用户 id。"""
+        start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+        end_exclusive = datetime.fromisoformat(date_to).replace(
+            tzinfo=timezone.utc
+        ) + timedelta(days=1)
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(UserModel.id).where(
+                            UserModel.created_at >= start,
+                            UserModel.created_at < end_exclusive,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return list(rows)
+
+    # ---- 运行时 kv 设置（注册名额覆盖等） ----
+
+    async def get_int_setting(self, key: str) -> int | None:
+        async with self._session_factory() as session:
+            model = await session.get(AppSettingModel, key)
+            if model is None or model.value == "":
+                return None
+            try:
+                return int(model.value)
+            except ValueError:
+                return None
+
+    async def set_int_setting(self, key: str, value: int) -> None:
+        async with self._session_factory() as session:
+            model = await session.get(AppSettingModel, key)
+            if model is None:
+                session.add(AppSettingModel(key=key, value=str(value)))
+            else:
+                model.value = str(value)
+            await session.commit()
 
     async def get_active_api_key(self, user_id: int) -> UserApiKeyView | None:
         async with self._session_factory() as session:

@@ -357,6 +357,11 @@ class AuthSettings(BaseSettings):
     portal_dist_dir: str = Field(
         default="", description="门户前端构建产物目录（容器内如 /app/portal-dist）；空则不挂载"
     )
+    max_users: int = Field(
+        default=0,
+        ge=0,
+        description="注册名额上限（0=不限）；可在 admin 面板运行时覆盖",
+    )
 
     @property
     def redirect_uri(self) -> str:

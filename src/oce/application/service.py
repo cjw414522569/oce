@@ -33,7 +33,13 @@ from oce.application.credential_admin import (
 )
 from oce.application.user_access import (
     AdminUserOverview,
+    DeleteUsersByIdsCommand,
+    DeleteUsersRegisteredCommand,
+    DeleteUsersResult,
     ListUsersQuery,
+    RegistrationInfo,
+    RegistrationInfoQuery,
+    SetMaxUsersCommand,
     SetUserStatusCommand,
     UserRecord,
 )
@@ -273,6 +279,25 @@ class RetrievalApplication:
 
     async def set_user_status(self, user_id: int, status: str) -> UserRecord:
         return await self._commands.execute(SetUserStatusCommand(user_id, status))
+
+    async def delete_user(self, user_id: int) -> DeleteUsersResult:
+        return await self._commands.execute(DeleteUsersByIdsCommand((user_id,)))
+
+    async def delete_users(self, user_ids: tuple[int, ...]) -> DeleteUsersResult:
+        return await self._commands.execute(DeleteUsersByIdsCommand(user_ids))
+
+    async def delete_users_registered(
+        self, date_from: str, date_to: str, dry_run: bool
+    ) -> DeleteUsersResult:
+        return await self._commands.execute(
+            DeleteUsersRegisteredCommand(date_from, date_to, dry_run)
+        )
+
+    async def registration_info(self) -> RegistrationInfo:
+        return await self._queries.ask(RegistrationInfoQuery())
+
+    async def set_max_users(self, max_users: int) -> RegistrationInfo:
+        return await self._commands.execute(SetMaxUsersCommand(max_users))
 
     async def create_credential(self, data: CredentialCreate) -> CredentialRecord:
         return await self._commands.execute(CreateCredentialCommand(data))

@@ -173,3 +173,63 @@ async def test_touch_throttled_within_window():
         first_ts = mod._touch_last_seen[identity.key_id]
         await store.touch_api_key(identity.key_id)
         assert mod._touch_last_seen[identity.key_id] == first_ts  # 未刷新 → 被节流
+
+
+async def test_delete_users_and_registered_range():
+    from datetime import datetime, timezone
+
+    async with _store() as (store, session_factory):
+        u1 = await store.upsert_user(_profile(linuxdo_id=1, username="a"))
+        u2 = await store.upsert_user(_profile(linuxdo_id=2, username="b"))
+
+        # 批量删除（含不存在 id）
+        deleted = await store.delete_users_by_ids([u1.id, u2.id, 999])
+        assert deleted == (u1.id, u2.id)
+        assert await store.get_user(u1.id) is None
+        assert await store.count_users() == 0
+
+        # 注册日期区间：手工回填 created_at 以脱离「现在」
+        u3 = await store.upsert_user(_profile(linuxdo_id=3, username="c"))
+        async with session_factory() as session:
+            model = await session.get(UserModel, u3.id)
+            model.created_at = datetime(2026, 9, 3, tzinfo=timezone.utc)
+            await session.commit()
+        ids = await store.user_ids_registered_between("2026-09-01", "2026-09-07")
+        assert ids == [u3.id]
+        ids_empty = await store.user_ids_registered_between("2026-08-01", "2026-08-31")
+        assert ids_empty == []
+
+
+async def test_registration_quota_setting_roundtrip():
+    async with _store() as (store, _):
+        assert await store.get_int_setting("auth.max_users") is None
+        await store.set_int_setting("auth.max_users", 5)
+        assert await store.get_int_setting("auth.max_users") == 5
+        await store.set_int_setting("auth.max_users", 0)
+        assert await store.get_int_setting("auth.max_users") == 0
+
+
+async def test_registration_quota_blocks_new_but_not_existing():
+    from oce.application.user_access import UserAccessService
+    from oce.shared.errors import LoginDeniedError
+
+    class _Provider:
+        @property
+        def redirect_uri(self):
+            return "https://x/cb"
+
+        def authorize_url(self, state):
+            return "https://x"
+
+        async def exchange_code(self, code):
+            return _profile(linuxdo_id=77, username="newbie")
+
+    async with _store() as (store, _):
+        await store.upsert_user(_profile(linuxdo_id=76, username="old"))
+        await store.set_int_setting("auth.max_users", 1)  # 已满
+
+        service = UserAccessService(store=store, provider=_Provider())
+        with pytest.raises(LoginDeniedError, match="名额"):
+            await service.authenticate("code")
+        # 既有用户不受影响
+        assert (await store.get_user_by_linuxdo(76)) is not None

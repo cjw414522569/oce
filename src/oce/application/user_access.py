@@ -110,6 +110,18 @@ class UserAccessStore(Protocol):
 
     async def set_user_status(self, user_id: int, status: str) -> UserRecord | None: ...
 
+    async def get_user_by_linuxdo(self, linuxdo_id: int) -> UserRecord | None: ...
+
+    async def count_users(self) -> int: ...
+
+    async def delete_users_by_ids(self, user_ids: list[int]) -> tuple[int, ...]: ...
+
+    async def user_ids_registered_between(self, date_from: str, date_to: str) -> list[int]: ...
+
+    async def get_int_setting(self, key: str) -> int | None: ...
+
+    async def set_int_setting(self, key: str, value: int) -> None: ...
+
     async def get_active_api_key(self, user_id: int) -> UserApiKeyView | None: ...
 
     async def rotate_api_key(self, user_id: int) -> IssuedApiKey: ...
@@ -126,16 +138,20 @@ class UserAccessStore(Protocol):
 class UserAccessService:
     """登录 / 门户 / key 生命周期编排。provider 为 None 表示功能整体关闭。"""
 
+    _MAX_USERS_KEY = "auth.max_users"
+
     def __init__(
         self,
         *,
         store: UserAccessStore,
         provider: OAuthProvider | None,
         min_trust_level: int | None = None,
+        env_max_users: int = 0,
     ) -> None:
         self._store = store
         self._provider = provider
         self._min_trust_level = min_trust_level
+        self._env_max_users = max(0, env_max_users)
 
     @property
     def provider(self) -> OAuthProvider | None:
@@ -154,6 +170,7 @@ class UserAccessService:
             raise LoginDeniedError("提供方账号状态不允许（inactive 或被禁言）")
         if self._min_trust_level is not None and profile.trust_level < self._min_trust_level:
             raise LoginDeniedError(f"信任等级低于门槛 {self._min_trust_level}")
+        await self._enforce_registration_quota(profile)
         user = await self._store.upsert_user(profile)
         if user.status != "active":
             raise LoginDeniedError("账号已被本服务禁用")
@@ -179,6 +196,48 @@ class UserAccessService:
             raise LoginDeniedError("账号不可用")
         return await self._store.rotate_api_key(user_id)
 
+    async def effective_max_users(self) -> int:
+        override = await self._store.get_int_setting(self._MAX_USERS_KEY)
+        return self._env_max_users if override is None else max(0, override)
+
+    async def registration_info(self) -> RegistrationInfo:
+        override = await self._store.get_int_setting(self._MAX_USERS_KEY)
+        return RegistrationInfo(
+            env_max_users=self._env_max_users,
+            override=override,
+            effective_max_users=(
+                self._env_max_users if override is None else max(0, override)
+            ),
+            active_count=await self._store.count_users(),
+        )
+
+    async def set_max_users(self, max_users: int) -> None:
+        await self._store.set_int_setting(self._MAX_USERS_KEY, max(0, max_users))
+
+    async def _enforce_registration_quota(self, profile: LinuxDoProfile) -> None:
+        """名额只挡新注册：老用户在满员后仍可登录。"""
+        limit = await self.effective_max_users()
+        if limit <= 0:
+            return
+        if await self._store.get_user_by_linuxdo(profile.linuxdo_id) is not None:
+            return
+        if await self._store.count_users() >= limit:
+            raise LoginDeniedError(f"注册名额已满（{limit} 人）")
+
+
+@dataclass(frozen=True)
+class RegistrationInfo:
+    """注册开关状态：覆盖值优先于 env 默认，0 = 不限。"""
+
+    env_max_users: int
+    override: int | None
+    effective_max_users: int
+    active_count: int
+
+    @property
+    def open(self) -> bool:
+        return self.effective_max_users <= 0 or self.active_count < self.effective_max_users
+
 
 @dataclass(frozen=True)
 class ListUsersQuery(Query):
@@ -201,6 +260,15 @@ class SetUserStatusCommand(Command):
     status: str  # active | disabled
 
 
+@dataclass(frozen=True)
+class DeleteUsersResult:
+    deleted_ids: tuple[int, ...] = ()
+
+    @property
+    def deleted_count(self) -> int:
+        return len(self.deleted_ids)
+
+
 class SetUserStatusCommandHandler:
     """本地封禁/解封（/admin/users/{id} PATCH）。封禁即时切断数据面（resolve JOIN）。"""
 
@@ -214,3 +282,85 @@ class SetUserStatusCommandHandler:
         if record is None:
             raise LookupError("user not found")
         return record
+
+
+@dataclass(frozen=True)
+class DeleteUserCommand(Command):
+    user_id: int
+
+
+class DeleteUserCommandHandler:
+    def __init__(self, store: UserAccessStore) -> None:
+        self._store = store
+
+    async def handle(self, command: DeleteUserCommand) -> DeleteUsersResult:
+        deleted = await self._store.delete_users_by_ids([command.user_id])
+        if not deleted:
+            raise LookupError("user not found")
+        return DeleteUsersResult(deleted_ids=deleted)
+
+
+@dataclass(frozen=True)
+class DeleteUsersByIdsCommand(Command):
+    user_ids: tuple[int, ...]
+
+
+class DeleteUsersByIdsCommandHandler:
+    def __init__(self, store: UserAccessStore) -> None:
+        self._store = store
+
+    async def handle(self, command: DeleteUsersByIdsCommand) -> DeleteUsersResult:
+        deleted = await self._store.delete_users_by_ids(list(command.user_ids))
+        return DeleteUsersResult(deleted_ids=deleted)
+
+
+@dataclass(frozen=True)
+class DeleteUsersRegisteredCommand(Command):
+    date_from: str  # YYYY-MM-DD（含）
+    date_to: str  # YYYY-MM-DD（含）
+    dry_run: bool = True
+
+
+class DeleteUsersRegisteredCommandHandler:
+    """按注册日期区间删除（某一天=from==to；某一周=起止同周）。dry_run 只计数。"""
+
+    def __init__(self, store: UserAccessStore) -> None:
+        self._store = store
+
+    async def handle(self, command: DeleteUsersRegisteredCommand) -> DeleteUsersResult:
+        ids = await self._store.user_ids_registered_between(
+            command.date_from, command.date_to
+        )
+        if command.dry_run:
+            return DeleteUsersResult(deleted_ids=tuple(ids))
+        deleted = await self._store.delete_users_by_ids(ids)
+        return DeleteUsersResult(deleted_ids=deleted)
+
+
+@dataclass(frozen=True)
+class RegistrationInfoQuery(Query):
+    pass
+
+
+class RegistrationInfoQueryHandler:
+    def __init__(self, service: UserAccessService) -> None:
+        self._service = service
+
+    async def handle(self, _query: RegistrationInfoQuery) -> RegistrationInfo:
+        return await self._service.registration_info()
+
+
+@dataclass(frozen=True)
+class SetMaxUsersCommand(Command):
+    max_users: int  # 0 = 不限；>=0
+
+
+class SetMaxUsersCommandHandler:
+    def __init__(self, service: UserAccessService) -> None:
+        self._service = service
+
+    async def handle(self, command: SetMaxUsersCommand) -> RegistrationInfo:
+        if command.max_users < 0:
+            raise ValueError("max_users 必须 >= 0（0 = 不限）")
+        await self._service.set_max_users(command.max_users)
+        return await self._service.registration_info()

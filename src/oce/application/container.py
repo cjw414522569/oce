@@ -46,8 +46,18 @@ from oce.application.credential_admin import (
     UpdateCredentialCommandHandler,
 )
 from oce.application.user_access import (
+    DeleteUserCommand,
+    DeleteUserCommandHandler,
+    DeleteUsersByIdsCommand,
+    DeleteUsersByIdsCommandHandler,
+    DeleteUsersRegisteredCommand,
+    DeleteUsersRegisteredCommandHandler,
     ListUsersQuery,
     ListUsersQueryHandler,
+    RegistrationInfoQuery,
+    RegistrationInfoQueryHandler,
+    SetMaxUsersCommand,
+    SetMaxUsersCommandHandler,
     SetUserStatusCommand,
     SetUserStatusCommandHandler,
     UserAccessService,
@@ -503,6 +513,7 @@ class Container:
             store=user_access_store,
             provider=LinuxDoOAuthClient(settings.auth) if settings.auth.enabled else None,
             min_trust_level=settings.auth.min_trust_level,
+            env_max_users=settings.auth.max_users,
         )
         query_bus.register(
             ListUsersQuery,
@@ -511,6 +522,26 @@ class Container:
         command_bus.register(
             SetUserStatusCommand,
             SetUserStatusCommandHandler(user_access_store),
+        )
+        command_bus.register(
+            DeleteUserCommand,
+            DeleteUserCommandHandler(user_access_store),
+        )
+        command_bus.register(
+            DeleteUsersByIdsCommand,
+            DeleteUsersByIdsCommandHandler(user_access_store),
+        )
+        command_bus.register(
+            DeleteUsersRegisteredCommand,
+            DeleteUsersRegisteredCommandHandler(user_access_store),
+        )
+        command_bus.register(
+            SetMaxUsersCommand,
+            SetMaxUsersCommandHandler(self.user_access),
+        )
+        query_bus.register(
+            RegistrationInfoQuery,
+            RegistrationInfoQueryHandler(self.user_access),
         )
         query_bus.register(
             QueueStatusQuery,

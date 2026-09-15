@@ -11,6 +11,11 @@ from oce.api.schemas import (
     AdminUserEntryResponse,
     AdminUserListResponse,
     AdminUserStatusRequest,
+    BatchDeleteUsersRequest,
+    DeleteUsersRegisteredRequest,
+    DeleteUsersResultResponse,
+    RegistrationInfoResponse,
+    SetMaxUsersRequest,
     CredentialCreateRequest,
     CredentialDuplicateRequest,
     CredentialListResponse,
@@ -94,6 +99,36 @@ async def list_users(
     )
 
 
+@admin_router.get("/users/registration", response_model=RegistrationInfoResponse)
+async def registration_info(
+    application: RetrievalApplication = Depends(get_application),
+) -> RegistrationInfoResponse:
+    info = await application.registration_info()
+    return RegistrationInfoResponse(
+        env_max_users=info.env_max_users,
+        override=info.override,
+        effective_max_users=info.effective_max_users,
+        active_count=info.active_count,
+        open=info.open,
+    )
+
+
+@admin_router.patch("/users/registration", response_model=RegistrationInfoResponse)
+async def set_max_users(
+    request: SetMaxUsersRequest,
+    application: RetrievalApplication = Depends(get_application),
+) -> RegistrationInfoResponse:
+    """运行时设置注册名额（0=不限）；覆盖 AUTH_MAX_USERS，重启保持。"""
+    info = await application.set_max_users(request.max_users)
+    return RegistrationInfoResponse(
+        env_max_users=info.env_max_users,
+        override=info.override,
+        effective_max_users=info.effective_max_users,
+        active_count=info.active_count,
+        open=info.open,
+    )
+
+
 @admin_router.patch("/users/{user_id}", response_model=AdminUserEntryResponse)
 async def set_user_status(
     user_id: int,
@@ -113,6 +148,51 @@ async def set_user_status(
         status=record.status,
         created_at=record.created_at,
         last_login_at=record.last_login_at,
+    )
+
+
+def _delete_result_response(result) -> DeleteUsersResultResponse:
+    return DeleteUsersResultResponse(
+        deleted_count=result.deleted_count, deleted_ids=list(result.deleted_ids)
+    )
+
+
+@admin_router.delete("/users/{user_id}", response_model=DeleteUsersResultResponse)
+async def delete_user(
+    user_id: int,
+    application: RetrievalApplication = Depends(get_application),
+) -> DeleteUsersResultResponse:
+    """删除单个用户（key 级联删除，会话随之失效）。"""
+    result = await application.delete_user(user_id)
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="user not found")
+    return _delete_result_response(result)
+
+
+@admin_router.post("/users/batch-delete", response_model=DeleteUsersResultResponse)
+async def batch_delete_users(
+    request: BatchDeleteUsersRequest,
+    application: RetrievalApplication = Depends(get_application),
+) -> DeleteUsersResultResponse:
+    """按 id 批量删除；不存在的 id 静默跳过。"""
+    return _delete_result_response(await application.delete_users(tuple(request.user_ids)))
+
+
+@admin_router.post("/users/delete-registered", response_model=DeleteUsersResultResponse)
+async def delete_users_registered(
+    request: DeleteUsersRegisteredRequest,
+    application: RetrievalApplication = Depends(get_application),
+) -> DeleteUsersResultResponse:
+    """按注册日期区间删除（闭区间；某一天=from==to，某一周=起止同周）。
+
+    dry_run=true 只返回将删除的 id，不执行。
+    """
+    if request.date_to < request.date_from:
+        raise HTTPException(status_code=422, detail="date_to 早于 date_from")
+    return _delete_result_response(
+        await application.delete_users_registered(
+            request.date_from.isoformat(), request.date_to.isoformat(), request.dry_run
+        )
     )
 
 

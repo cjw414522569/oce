@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -573,3 +573,30 @@ class AdminUserListResponse(BaseModel):
 
 class AdminUserStatusRequest(BaseModel):
     status: Literal["active", "disabled"]
+
+
+class BatchDeleteUsersRequest(BaseModel):
+    user_ids: list[int] = Field(min_length=1)
+
+
+class DeleteUsersRegisteredRequest(BaseModel):
+    date_from: date
+    date_to: date
+    dry_run: bool = True
+
+
+class DeleteUsersResultResponse(BaseModel):
+    deleted_count: int = 0
+    deleted_ids: list[int] = Field(default_factory=list)
+
+
+class RegistrationInfoResponse(BaseModel):
+    env_max_users: int = 0
+    override: int | None = None
+    effective_max_users: int = 0
+    active_count: int = 0
+    open: bool = True
+
+
+class SetMaxUsersRequest(BaseModel):
+    max_users: int = Field(ge=0, description="0 = 不限")

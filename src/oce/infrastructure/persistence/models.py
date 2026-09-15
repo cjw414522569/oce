@@ -409,3 +409,13 @@ class UserApiKeyModel(Base):
             postgresql_where=text("status = 'active'"),
         ),
     )
+
+
+class AppSettingModel(Base):
+    """通用 kv 运行时设置（如注册名额覆盖）。值一律存字符串，语义由使用方解释。"""
+
+    __tablename__ = "app_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

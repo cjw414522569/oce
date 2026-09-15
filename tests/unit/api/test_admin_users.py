@@ -119,3 +119,90 @@ async def test_patch_user_status_invalid_rejected(client):
         headers={"Authorization": "Bearer sk-admin"},
     )
     assert resp.status_code == 422  # Literal 校验
+
+
+@dataclass
+class StubDeletionApp:
+    async def delete_user(self, user_id: int):
+        from oce.application.user_access import DeleteUsersResult
+        return DeleteUsersResult(deleted_ids=(user_id,)) if user_id != 99 else DeleteUsersResult()
+
+    async def delete_users(self, user_ids):
+        from oce.application.user_access import DeleteUsersResult
+        return DeleteUsersResult(deleted_ids=tuple(user_ids))
+
+    async def delete_users_registered(self, date_from, date_to, dry_run):
+        from oce.application.user_access import DeleteUsersResult
+        return DeleteUsersResult(deleted_ids=(1, 2) if not dry_run else (1, 2, 3))
+
+    async def registration_info(self):
+        from oce.application.user_access import RegistrationInfo
+        return RegistrationInfo(env_max_users=0, override=5, effective_max_users=5, active_count=3)
+
+    async def set_max_users(self, max_users):
+        from oce.application.user_access import RegistrationInfo
+        return RegistrationInfo(env_max_users=0, override=max_users, effective_max_users=max_users, active_count=3)
+
+
+async def test_delete_user(client):
+    app = client._transport.app  # noqa: SLF001
+    app.dependency_overrides[get_application] = lambda: StubDeletionApp()
+    ok = await client.delete("/admin/users/1", headers={"Authorization": "Bearer sk-admin"})
+    assert ok.status_code == 200 and ok.json()["deleted_count"] == 1
+    missing = await client.delete("/admin/users/99", headers={"Authorization": "Bearer sk-admin"})
+    assert missing.status_code == 404
+
+
+async def test_batch_delete_users(client):
+    app = client._transport.app  # noqa: SLF001
+    app.dependency_overrides[get_application] = lambda: StubDeletionApp()
+    resp = await client.post(
+        "/admin/users/batch-delete",
+        json={"user_ids": [1, 2, 3]},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["deleted_count"] == 3
+
+
+async def test_delete_registered_dry_run_and_execute(client):
+    app = client._transport.app  # noqa: SLF001
+    app.dependency_overrides[get_application] = lambda: StubDeletionApp()
+    dry = await client.post(
+        "/admin/users/delete-registered",
+        json={"date_from": "2026-09-01", "date_to": "2026-09-07", "dry_run": True},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert dry.status_code == 200 and dry.json()["deleted_count"] == 3
+    real = await client.post(
+        "/admin/users/delete-registered",
+        json={"date_from": "2026-09-01", "date_to": "2026-09-07", "dry_run": False},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert real.status_code == 200 and real.json()["deleted_count"] == 2
+    bad = await client.post(
+        "/admin/users/delete-registered",
+        json={"date_from": "2026-09-08", "date_to": "2026-09-01", "dry_run": True},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert bad.status_code == 422
+
+
+async def test_registration_quota_endpoints(client):
+    app = client._transport.app  # noqa: SLF001
+    app.dependency_overrides[get_application] = lambda: StubDeletionApp()
+    info = await client.get("/admin/users/registration", headers={"Authorization": "Bearer sk-admin"})
+    assert info.status_code == 200
+    assert info.json()["effective_max_users"] == 5 and info.json()["open"] is True
+    patched = await client.patch(
+        "/admin/users/registration",
+        json={"max_users": 10},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert patched.status_code == 200 and patched.json()["effective_max_users"] == 10
+    invalid = await client.patch(
+        "/admin/users/registration",
+        json={"max_users": -1},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert invalid.status_code == 422

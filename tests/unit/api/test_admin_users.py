@@ -233,9 +233,12 @@ async def test_queue_throughput_includes_failures(client):
             from oce.application.queries.queue import QueueThroughputResult
 
             return QueueThroughputResult(
-                counts={"last_1h": 5},
+                counts={"last_1h": 5, "last_10m": 30},
                 failed={"last_1h": 2},
                 error_total=3434,
+                backlog=900,
+                rate_per_minute=3.0,
+                eta_seconds=18000,
             )
 
         async def clear_failed_blobs(self, limit: int) -> int:
@@ -246,6 +249,7 @@ async def test_queue_throughput_includes_failures(client):
     resp = await client.get("/admin/queue/throughput", headers={"Authorization": "Bearer sk-admin"})
     body = resp.json()
     assert body["failed"]["last_1h"] == 2 and body["error_total"] == 3434
+    assert body["eta_seconds"] == 18000 and body["backlog"] == 900
     cleared = await client.post(
         "/admin/queue/clear-failed",
         json={"limit": 500},

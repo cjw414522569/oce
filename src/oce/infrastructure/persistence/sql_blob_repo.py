@@ -101,6 +101,15 @@ class SqlBlobRepository(BlobRepository):
             int(row.error_total),
         )
 
+    async def count_pending(self) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(BlobModel)
+                .where(BlobModel.status == "pending")
+            )
+        )
+
     async def find_error_names(self, limit: int) -> list[str]:
         rows = (
             await self.session.execute(

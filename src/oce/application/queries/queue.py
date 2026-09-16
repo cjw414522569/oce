@@ -52,6 +52,7 @@ class QueueStatusQueryHandler:
 # 吞吐视图窗口：名称 → 秒
 THROUGHPUT_WINDOWS: dict[str, int] = {
     "last_1m": 60,
+    "last_10m": 600,
     "last_1h": 3600,
     "last_24h": 86400,
     "last_7d": 604800,
@@ -69,6 +70,10 @@ class QueueThroughputResult:
     counts: dict[str, int]
     failed: dict[str, int]
     error_total: int
+    backlog: int = 0
+    rate_per_minute: float = 0.0
+    # 积压 ÷ 近10分钟速率；速率为 0（停摆/无积压）时为 None
+    eta_seconds: int | None = None
 
 
 class QueueThroughputQueryHandler:
@@ -83,6 +88,15 @@ class QueueThroughputQueryHandler:
             failed, error_total = await uow.blobs.count_failed_windows(
                 THROUGHPUT_WINDOWS
             )
+            backlog = await uow.blobs.count_pending()
+        # ETA 用 10 分钟窗口：1 分钟噪声太大、1 小时又对新变化不敏感
+        rate = counts.get("last_10m", 0) / 10.0
+        eta = int(backlog / rate * 60) if rate > 0 and backlog > 0 else None
         return QueueThroughputResult(
-            counts=counts, failed=failed, error_total=error_total
+            counts=counts,
+            failed=failed,
+            error_total=error_total,
+            backlog=backlog,
+            rate_per_minute=round(rate, 1),
+            eta_seconds=eta,
         )

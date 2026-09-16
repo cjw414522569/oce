@@ -404,3 +404,25 @@ async def test_completed_at_persists_on_update_path():
             assert row.completed_at is not None, "UPDATE 分支丢失 completed_at"
     finally:
         await engine.dispose()
+
+
+async def test_count_pending():
+    from oce.infrastructure.persistence.models import BlobModel
+    from oce.infrastructure.persistence.sql_blob_repo import SqlBlobRepository
+
+    async with _store() as (_, session_factory):
+        async with session_factory() as session:
+            for name, status in (("p1", "pending"), ("p2", "pending"), ("r1", "ready")):
+                session.add(
+                    BlobModel(
+                        blob_name=hash_api_key(name),
+                        path=f"{name}.py",
+                        content_size=1,
+                        file_type="text",
+                        status=status,
+                    )
+                )
+            await session.commit()
+        async with session_factory() as session:
+            repo = SqlBlobRepository(session)
+            assert await repo.count_pending() == 2

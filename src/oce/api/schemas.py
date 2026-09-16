@@ -484,6 +484,9 @@ class QueueThroughputResponse(BaseModel):
     counts: dict[str, int] = Field(default_factory=dict)
     failed: dict[str, int] = Field(default_factory=dict)
     error_total: int = 0
+    backlog: int = 0
+    rate_per_minute: float = 0.0
+    eta_seconds: int | None = None
 
 
 class QueueStatusResponse(BaseModel):

@@ -61,6 +61,9 @@ class BlobRepository(Protocol):
     def find_error_names(self, limit: int) -> list[str]:
         """终态失败 blob 名（清理供客户端重传）。"""
 
+    def count_pending(self) -> int:
+        """当前 pending blob 总量（积压/ETA 计算）。"""
+
 
 class ChainRepository(Protocol):
     async def get(self, chain_id: str) -> Chain | None: ...

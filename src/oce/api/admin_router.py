@@ -303,7 +303,12 @@ async def queue_throughput(
     """队列吞吐：各时间窗（1m/1h/24h/7d/30d）完成与失败的 blob 数。"""
     result = await application.queue_throughput()
     return QueueThroughputResponse(
-        counts=result.counts, failed=result.failed, error_total=result.error_total
+        counts=result.counts,
+        failed=result.failed,
+        error_total=result.error_total,
+        backlog=result.backlog,
+        rate_per_minute=result.rate_per_minute,
+        eta_seconds=result.eta_seconds,
     )
 
 

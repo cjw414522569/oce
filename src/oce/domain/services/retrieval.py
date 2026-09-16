@@ -20,7 +20,7 @@ from typing import Callable, Iterator
 from loguru import logger
 
 from oce.domain.services.embedder import Embedder
-from oce.domain.services.llm.intent import IntentClassifier
+from oce.domain.services.llm.intent import IntentClassifier, QueryIntent
 from oce.domain.services.path_search import PathSearchStore
 from oce.domain.services.query_classifier import (
     QueryIntent as HeuristicQueryIntent,
@@ -43,6 +43,11 @@ try:
     from oce.domain.services.llm.reranker import LLMReranker
 except ImportError:
     LLMReranker = None  # type: ignore
+
+
+def _heuristic_to_llm_intent(intent: HeuristicQueryIntent) -> QueryIntent:
+    """启发式意图 → LLM 意图枚举，供 get_strategy 派发；两者成员名一一对应。"""
+    return QueryIntent[intent.name]
 
 
 @contextmanager
@@ -167,8 +172,16 @@ class RetrievalPipeline:
         strategy = None
         detected_intent = None
         if self.intent_classifier is not None:
-            with stage("intent"):
-                detected_intent = await self.intent_classifier.classify(query)
+            try:
+                with stage("intent"):
+                    detected_intent = await self.intent_classifier.classify(query)
+            except Exception as e:
+                # LLM 意图分类失败（未配 key、超时、限流等）回退启发式分类，
+                # 不让单次检索因 LLM 不可用而崩溃；启发式为纯正则，恒定可用。
+                logger.warning(
+                    f"LLM intent classification failed: {e}, falling back to heuristic"
+                )
+                detected_intent = _heuristic_to_llm_intent(classify_query_intent(query))
             strategy = get_strategy(detected_intent)
             logger.debug(f"Query intent: {detected_intent.value}, strategy: {strategy}")
         if audit is not None and detected_intent is not None:

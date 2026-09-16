@@ -7,6 +7,7 @@ import math
 from typing import Awaitable, Callable
 
 import httpx
+from loguru import logger
 from openai import AsyncOpenAI
 
 # 用量回调：(credential_id, kind, model, prompt_tokens, completion_tokens)
@@ -193,12 +194,29 @@ class OpenAIEmbedder:
         return [value / norm for value in pooled] if norm else pooled
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=texts,
-            dimensions=self._dimensions,
-            encoding_format="float",
-        )
+        # 部分模型（如 f2llm 系列）不接受 dimensions 参数，收到 400 指示后降级为
+        # 不发送该参数并记忆（粘性）；返回维度仍由下方校验兜底，配置错配会显式报错
+        kwargs = {} if getattr(self, "_omit_dimensions", False) else {"dimensions": self._dimensions}
+        try:
+            response = await self._client.embeddings.create(
+                model=self._model,
+                input=texts,
+                encoding_format="float",
+                **kwargs,
+            )
+        except Exception as exc:
+            if "dimensions" not in str(exc).lower() or not kwargs:
+                raise
+            logger.info(
+                "Embedding provider rejected dimensions param; retrying without it (model={})",
+                self._model,
+            )
+            self._omit_dimensions = True
+            response = await self._client.embeddings.create(
+                model=self._model,
+                input=texts,
+                encoding_format="float",
+            )
         data = sorted(response.data, key=lambda item: item.index)
         vectors = [list(item.embedding) for item in data]
         if len(vectors) != len(texts):

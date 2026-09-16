@@ -119,3 +119,42 @@ async def test_embed_reports_usage_with_model_and_credential_id():
 
     # 假 client 的 usage.total_tokens = len("abc") = 3；embed 无 completion，记 0
     assert captured == [(9, "embed", "test-model", 3, 0)]
+
+
+async def test_dimensions_param_omitted_after_rejection(monkeypatch):
+    """上游拒绝 dimensions 参数时（如 f2llm），自动降级为不发送并粘性记忆。"""
+    from oce.infrastructure.embed.openai_embedder import OpenAIEmbedder
+
+    calls: list[dict] = []
+
+    class _FakeCompletions:
+        async def create(self, *, model, input, encoding_format, **kwargs):
+            calls.append(kwargs)
+            if "dimensions" in kwargs:
+                raise RuntimeError(
+                    "Model does not support Matryoshka embeddings; dimensions must be unset"
+                )
+            return SimpleNamespace(
+                data=[
+                    SimpleNamespace(index=i, embedding=[0.1] * 4096)
+                    for i in range(len(input))
+                ],
+                usage=None,
+            )
+
+    class _FakeClient:
+        embeddings = SimpleNamespace(create=_FakeCompletions().create)
+
+    embedder = OpenAIEmbedder.__new__(OpenAIEmbedder)
+    embedder._client = _FakeClient()
+    embedder._model = "f2llm-v2-8b"
+    embedder._dimensions = 4096
+    embedder._on_usage = None
+
+    vectors = await embedder._embed_batch(["a", "b"])
+    assert len(vectors) == 2 and len(vectors[0]) == 4096
+    # 第一次带 dimensions 被拒，第二次不带；再调用直接不带（粘性）
+    assert "dimensions" in calls[0]
+    assert "dimensions" not in calls[1]
+    await embedder._embed_batch(["c"])
+    assert "dimensions" not in calls[2]

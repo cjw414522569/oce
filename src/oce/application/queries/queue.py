@@ -67,6 +67,8 @@ class QueueThroughputQuery(Query):
 @dataclass(frozen=True)
 class QueueThroughputResult:
     counts: dict[str, int]
+    failed: dict[str, int]
+    error_total: int
 
 
 class QueueThroughputQueryHandler:
@@ -78,4 +80,9 @@ class QueueThroughputQueryHandler:
     async def handle(self, _query: QueueThroughputQuery) -> QueueThroughputResult:
         async with self._uow_factory() as uow:
             counts = await uow.blobs.count_completed_windows(THROUGHPUT_WINDOWS)
-        return QueueThroughputResult(counts=counts)
+            failed, error_total = await uow.blobs.count_failed_windows(
+                THROUGHPUT_WINDOWS
+            )
+        return QueueThroughputResult(
+            counts=counts, failed=failed, error_total=error_total
+        )

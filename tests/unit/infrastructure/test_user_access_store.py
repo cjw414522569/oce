@@ -286,3 +286,80 @@ async def test_count_completed_windows():
         assert counts["last_24h"] == 3
         assert counts["last_7d"] == 3
         assert counts["last_30d"] == 4
+
+
+async def test_count_failed_windows_and_error_total():
+    from datetime import datetime, timezone
+
+    from oce.infrastructure.persistence.models import BlobModel
+    from oce.infrastructure.persistence.sql_blob_repo import SqlBlobRepository
+
+    async with _store() as (_, session_factory):
+        async with session_factory() as session:
+            now = datetime.now(timezone.utc)
+            # 2 个近期失败 + 1 个老失败 + 1 个 ready
+            # 30s/30min 避开窗口边界竞态；40 天前超出 30d 窗口
+            for minutes_ago, name, status in ((0.5, "f1", "error"), (30, "f2", "error"), (40 * 24 * 60, "f3", "error")):
+                session.add(
+                    BlobModel(
+                        blob_name=hash_api_key(name),
+                        path=f"{name}.py",
+                        content_size=1,
+                        file_type="text",
+                        status=status,
+                        failed_at=datetime.fromtimestamp(
+                            now.timestamp() - minutes_ago * 60, tz=timezone.utc
+                        ),
+                    )
+                )
+            session.add(
+                BlobModel(
+                    blob_name=hash_api_key("ok1"),
+                    path="ok1.py",
+                    content_size=1,
+                    file_type="text",
+                    status="ready",
+                )
+            )
+            await session.commit()
+
+            repo = SqlBlobRepository(session)
+            windows = {"last_1m": 60, "last_1h": 3600, "last_30d": 2592000}
+            failed, error_total = await repo.count_failed_windows(windows)
+            assert failed["last_1m"] == 1
+            assert failed["last_1h"] == 2
+            assert failed["last_30d"] == 2  # 40 天前的失败超出 30d 窗口
+        assert error_total == 3
+
+
+async def test_find_error_names_and_reset_semantics():
+    from oce.infrastructure.persistence.models import BlobModel
+
+    async with _store() as (_, session_factory):
+        async with session_factory() as session:
+            session.add(
+                BlobModel(
+                    blob_name=hash_api_key("e1"),
+                    path="e1.py",
+                    content_size=1,
+                    file_type="text",
+                    status="error",
+                )
+            )
+            session.add(
+                BlobModel(
+                    blob_name=hash_api_key("r1"),
+                    path="r1.py",
+                    content_size=1,
+                    file_type="text",
+                    status="ready",
+                )
+            )
+            await session.commit()
+            repo_names = None
+        from oce.infrastructure.persistence.sql_blob_repo import SqlBlobRepository
+
+        async with session_factory() as session:
+            repo = SqlBlobRepository(session)
+            repo_names = await repo.find_error_names(10)
+        assert repo_names == [hash_api_key("e1")]

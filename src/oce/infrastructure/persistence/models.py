@@ -101,6 +101,8 @@ class BlobModel(Base):
     retry_count = Column(Integer, nullable=False, server_default="0")
     # worker 完成嵌入的时间（吞吐统计）；存量行为迁移回填的近似值
     completed_at = Column(DateTime(timezone=True))
+    # 最终失败时间（重试耗尽置 error 时打点；成功后清除）
+    failed_at = Column(DateTime(timezone=True))
     last_seen = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     error_message = Column(Text)
@@ -112,6 +114,7 @@ class BlobModel(Base):
         Index("ix_blobs_language", "language"),
         Index("ix_blobs_retry_count", "retry_count"),
         Index("ix_blobs_completed_at", "completed_at"),
+        Index("ix_blobs_failed_at", "failed_at"),
     )
 
 

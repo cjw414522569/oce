@@ -209,12 +209,46 @@ async def test_registration_quota_endpoints(client):
 
 
 async def test_queue_throughput_endpoint(client):
+    from oce.application.queries.queue import QueueThroughputResult
+
     class _ThroughputApp(StubApplication):
         async def queue_throughput(self):
-            return {"last_1m": 3, "last_1h": 42, "last_24h": 900, "last_7d": 7000, "last_30d": 14000}
+            return QueueThroughputResult(
+                counts={"last_1m": 3, "last_1h": 42, "last_24h": 900, "last_7d": 7000, "last_30d": 14000},
+                failed={"last_1m": 0, "last_1h": 1, "last_24h": 5, "last_7d": 5, "last_30d": 5},
+                error_total=5,
+            )
 
     app = client._transport.app  # noqa: SLF001
     app.dependency_overrides[get_application] = lambda: _ThroughputApp()
     resp = await client.get("/admin/queue/throughput", headers={"Authorization": "Bearer sk-admin"})
     assert resp.status_code == 200
     assert resp.json()["counts"]["last_1h"] == 42
+    assert resp.json()["error_total"] == 5
+
+
+async def test_queue_throughput_includes_failures(client):
+    class _ThroughputApp2(StubApplication):
+        async def queue_throughput(self):
+            from oce.application.queries.queue import QueueThroughputResult
+
+            return QueueThroughputResult(
+                counts={"last_1h": 5},
+                failed={"last_1h": 2},
+                error_total=3434,
+            )
+
+        async def clear_failed_blobs(self, limit: int) -> int:
+            return limit
+
+    app = client._transport.app  # noqa: SLF001
+    app.dependency_overrides[get_application] = lambda: _ThroughputApp2()
+    resp = await client.get("/admin/queue/throughput", headers={"Authorization": "Bearer sk-admin"})
+    body = resp.json()
+    assert body["failed"]["last_1h"] == 2 and body["error_total"] == 3434
+    cleared = await client.post(
+        "/admin/queue/clear-failed",
+        json={"limit": 500},
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert cleared.status_code == 200 and cleared.json()["cleared"] == 500

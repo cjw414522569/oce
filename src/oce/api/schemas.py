@@ -470,10 +470,20 @@ class CredentialDuplicateRequest(BaseModel):
     num_rewrites: int | None = None
 
 
+class ClearFailedRequest(BaseModel):
+    limit: int = Field(default=1000, ge=1, le=20000)
+
+
+class ClearFailedResponse(BaseModel):
+    cleared: int = 0
+
+
 class QueueThroughputResponse(BaseModel):
-    """各时间窗完成的 blob 数（键如 last_1m/last_1h/last_24h/last_7d/last_30d）。"""
+    """各时间窗完成/失败的 blob 数（键如 last_1m/last_1h/last_24h/last_7d/last_30d）。"""
 
     counts: dict[str, int] = Field(default_factory=dict)
+    failed: dict[str, int] = Field(default_factory=dict)
+    error_total: int = 0
 
 
 class QueueStatusResponse(BaseModel):

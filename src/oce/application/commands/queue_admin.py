@@ -76,3 +76,40 @@ class ResetQueueCommandHandler:
             queue_size=await self._queue.size(),
             db_pending=len(pending),
         )
+
+
+@dataclass(frozen=True)
+class ClearFailedBlobsCommand(Command):
+    """清理终态失败 blob（limit 控制单批规模）。
+
+    error blob 的 staging 已被清理，服务端无法重嵌；删除记录后客户端
+    find-missing 判定未索引会自动重传（内容寻址幂等）。
+    """
+
+    limit: int = 1000
+
+
+@dataclass(frozen=True)
+class ClearFailedBlobsResult:
+    cleared: int
+
+
+class ClearFailedBlobsCommandHandler:
+    """失败清理 = 查 error 名单 → 复用 DeleteBlobs（DB + 向量 + 路径索引）。"""
+
+    def __init__(
+        self,
+        uow_factory: UnitOfWorkFactory,
+        delete_blobs: "DeleteBlobsCommandHandler",  # type: ignore[name-defined]
+    ) -> None:
+        self._uow_factory = uow_factory
+        self._delete_blobs = delete_blobs
+
+    async def handle(self, command: ClearFailedBlobsCommand) -> ClearFailedBlobsResult:
+        from oce.application.commands.ingest import DeleteBlobsCommand
+
+        async with self._uow_factory() as uow:
+            names = await uow.blobs.find_error_names(max(1, command.limit))
+        if names:
+            await self._delete_blobs.handle(DeleteBlobsCommand(tuple(names)))
+        return ClearFailedBlobsResult(cleared=len(names))

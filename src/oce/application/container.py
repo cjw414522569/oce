@@ -26,6 +26,8 @@ from oce.application.commands.ingest import (
     IngestBlobsCommandHandler,
 )
 from oce.application.commands.queue_admin import (
+    ClearFailedBlobsCommand,
+    ClearFailedBlobsCommandHandler,
     ResetQueueCommand,
     ResetQueueCommandHandler,
 )
@@ -384,6 +386,10 @@ class Container:
             path_store=self.path_index,
         )
         command_bus.register(DeleteBlobsCommand, delete_blobs_handler)
+        command_bus.register(
+            ClearFailedBlobsCommand,
+            ClearFailedBlobsCommandHandler(self._uow_factory, delete_blobs_handler),
+        )
         command_bus.register(
             ReloadEmbeddingCredentialsCommand,
             ReloadEmbeddingCredentialsCommandHandler(credential_runtime),

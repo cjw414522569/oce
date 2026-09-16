@@ -76,6 +76,42 @@ class SqlBlobRepository(BlobRepository):
         ).one()
         return {name: int(getattr(row, name)) for name in windows}
 
+    async def count_failed_windows(
+        self, windows: dict[str, int]
+    ) -> tuple[dict[str, int], int]:
+        """各时间窗最终失败数 + 当前 error 堆积总量（单查询）。"""
+        cutoff = datetime.now(timezone.utc)
+        columns = [
+            func.count()
+            .filter(BlobModel.status == "error")
+            .label("error_total")
+        ]
+        for name, seconds in windows.items():
+            threshold = cutoff - timedelta(seconds=seconds)
+            columns.append(
+                func.count()
+                .filter(BlobModel.failed_at >= threshold)
+                .label(name)
+            )
+        row = (
+            await self.session.execute(select(*columns))
+        ).one()
+        return (
+            {name: int(getattr(row, name)) for name in windows},
+            int(row.error_total),
+        )
+
+    async def find_error_names(self, limit: int) -> list[str]:
+        rows = (
+            await self.session.execute(
+                select(BlobModel.blob_name)
+                .where(BlobModel.status == "error")
+                .order_by(BlobModel.blob_name)
+                .limit(limit)
+            )
+        ).scalars().all()
+        return list(rows)
+
     async def exists(self, blob_name: str) -> bool:
         count = await self.session.scalar(
             select(func.count()).select_from(BlobModel).where(BlobModel.blob_name == blob_name)
@@ -111,6 +147,7 @@ class SqlBlobRepository(BlobRepository):
                 "error_message": blob.error_message,
                 "uploaded_by": blob.uploaded_by,
                 "completed_at": blob.completed_at,
+                "failed_at": blob.failed_at,
             }
             for blob in blobs
         ]
@@ -369,4 +406,5 @@ class SqlBlobRepository(BlobRepository):
             error_message=row.error_message,
             uploaded_by=row.uploaded_by,
             completed_at=row.completed_at,
+            failed_at=row.failed_at,
         )

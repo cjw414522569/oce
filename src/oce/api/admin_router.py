@@ -27,6 +27,8 @@ from oce.api.schemas import (
     MonitoringStatsResponse,
     QueueResetRequest,
     QueueResetResponse,
+    ClearFailedRequest,
+    ClearFailedResponse,
     QueueStatusResponse,
     QueueThroughputResponse,
     ReloadCredentialsResponse,
@@ -298,9 +300,22 @@ async def queue_status(
 async def queue_throughput(
     application: RetrievalApplication = Depends(get_application),
 ) -> QueueThroughputResponse:
-    """队列吞吐：各时间窗（1m/1h/24h/7d/30d）完成的 blob 数。"""
-    return QueueThroughputResponse(counts=await application.queue_throughput())
+    """队列吞吐：各时间窗（1m/1h/24h/7d/30d）完成与失败的 blob 数。"""
+    result = await application.queue_throughput()
+    return QueueThroughputResponse(
+        counts=result.counts, failed=result.failed, error_total=result.error_total
+    )
 
+
+@admin_router.post("/queue/clear-failed", response_model=ClearFailedResponse)
+async def clear_failed_blobs(
+    request: ClearFailedRequest,
+    application: RetrievalApplication = Depends(get_application),
+) -> ClearFailedResponse:
+    """清理终态失败 blob（DB + 向量 + 路径索引）；客户端将自动重传。"""
+    return ClearFailedResponse(
+        cleared=await application.clear_failed_blobs(request.limit)
+    )
 
 
 @admin_router.post("/queue/reset", response_model=QueueResetResponse)

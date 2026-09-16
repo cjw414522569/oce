@@ -53,6 +53,14 @@ class BlobRepository(Protocol):
     def count_completed_windows(self, windows: dict[str, int]) -> dict[str, int]:
         """按窗口名→秒数统计 completed_at 落窗内的 blob 数。"""
 
+    def count_failed_windows(
+        self, windows: dict[str, int]
+    ) -> tuple[dict[str, int], int]:
+        """各窗口失败数 + 当前 error 堆积总量。"""
+
+    def find_error_names(self, limit: int) -> list[str]:
+        """终态失败 blob 名（清理供客户端重传）。"""
+
 
 class ChainRepository(Protocol):
     async def get(self, chain_id: str) -> Chain | None: ...

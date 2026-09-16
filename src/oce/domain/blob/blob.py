@@ -46,7 +46,8 @@ class Blob:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: str | None = None
     uploaded_by: int | None = None
-    completed_at: datetime | None = None    # 失败原因
+    completed_at: datetime | None = None
+    failed_at: datetime | None = None    # 失败原因
     
     def __post_init__(self):
         """验证不变量"""
@@ -70,9 +71,10 @@ class Blob:
         self.completed_at = datetime.now(timezone.utc)
     
     def mark_error(self, error_message: str) -> None:
-        """标记为错误状态"""
+        """标记为错误状态（终态失败，打点供失败窗口统计）"""
         self.status = BlobStatus.ERROR
         self.error_message = error_message
+        self.failed_at = datetime.now(timezone.utc)
 
     def increment_retry(self, max_retries: int = 3) -> bool:
         """增加重试计数，超限自动 mark_error。返回是否已超限。"""

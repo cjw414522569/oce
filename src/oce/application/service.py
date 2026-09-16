@@ -18,7 +18,11 @@ from oce.application.commands.ingest import (
     IngestBlobsCommand,
 )
 from oce.application.commands.gc import GcCommand, GcResult
-from oce.application.commands.queue_admin import ResetQueueCommand, ResetQueueResult
+from oce.application.commands.queue_admin import (
+    ClearFailedBlobsCommand,
+    ResetQueueCommand,
+    ResetQueueResult,
+)
 from oce.application.commands.requeue import RequeueStaleCommand, RequeueStaleResult
 from oce.application.credential_admin import (
     CreateCredentialCommand,
@@ -258,8 +262,11 @@ class RetrievalApplication:
     async def queue_status(self) -> QueueStatusResult:
         return await self._queries.ask(QueueStatusQuery())
 
-    async def queue_throughput(self) -> dict[str, int]:
-        return (await self._queries.ask(QueueThroughputQuery())).counts
+    async def queue_throughput(self):
+        return await self._queries.ask(QueueThroughputQuery())
+
+    async def clear_failed_blobs(self, limit: int) -> int:
+        return (await self._commands.execute(ClearFailedBlobsCommand(limit))).cleared
 
     async def reset_queue(
         self, *, mode: str = "sync", requeue: bool = True

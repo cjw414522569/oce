@@ -194,23 +194,45 @@ class IndexingPipeline:
             # 嵌入关闭时无法生成向量，一并跳过。
             return 0
 
-        # 第二阶段:嵌入
+        # 第二阶段:嵌入 —— chunk 文本与路径文档合并进同一次 embed_documents：
+        # 中位 blob 只有 1 个 chunk，原先 chunk 批 + 路径文档要串行发 2 次上游请求，
+        # 合并后每 blob 只发 1 次（embedder 内部仍按批量/字符预算自动分批），请求量减半
         pending = await self.chunk_repo.find_pending_for_blobs(
             [blob.blob_name for blob in blobs]
         )
+        path_docs: list[dict] = []
+        if self.path_store is not None:
+            path_docs = [
+                {
+                    "blob_name": blob.blob_name,
+                    "path": blob.path,
+                    "path_document": build_path_document(blob.path),
+                }
+                for blob in blobs
+                if blob.status == BlobStatus.PENDING and is_indexable_path(blob.path)
+            ]
         embedded = 0
+        # 路径文档向量按 blob_name 暂存，第三阶段 ready 后免重嵌直接写入路径索引
+        path_vectors: dict[str, list] = {}
         try:
-            for offset in range(0, len(pending), self.embed_batch_size):
-                chunk_batch = pending[offset:offset + self.embed_batch_size]
-
-                vectors = await self.embedder.embed_documents(
-                    [chunk.embedding_text() for chunk in chunk_batch]
-                )
-                if len(vectors) != len(chunk_batch):
+            texts = [chunk.embedding_text() for chunk in pending]
+            texts += [doc["path_document"] for doc in path_docs]
+            all_vectors: list[list[float]] = []
+            if texts:
+                all_vectors = await self.embedder.embed_documents(texts)
+                if len(all_vectors) != len(texts):
                     raise RuntimeError(
                         "Embedding count mismatch: "
-                        f"expected {len(chunk_batch)}, got {len(vectors)}"
+                        f"expected {len(texts)}, got {len(all_vectors)}"
                     )
+                path_vectors = {
+                    doc["blob_name"]: vector
+                    for doc, vector in zip(path_docs, all_vectors[len(pending):])
+                }
+            for offset in range(0, len(pending), self.embed_batch_size):
+                chunk_batch = pending[offset:offset + self.embed_batch_size]
+                vectors = all_vectors[offset:offset + self.embed_batch_size]
+
                 await self.vector_index.upsert([
                     {
                         "chunk_id": chunk.chunk_id,
@@ -258,21 +280,29 @@ class IndexingPipeline:
                         data={"blob_name": blob.blob_name, "path": blob.path},
                     ))
         # 路径索引写入失败不应影响主索引（chunk 已嵌入、blob 已 ready），仅记日志
-        await self._index_paths(ready_blobs)
+        await self._index_paths(ready_blobs, precomputed=path_vectors)
         return embedded
 
-    async def _index_paths(self, blobs: Sequence[Blob]) -> None:
+    async def _index_paths(
+        self,
+        blobs: Sequence[Blob],
+        precomputed: dict[str, list] | None = None,
+    ) -> None:
         """把 ready blob 的路径写入路径索引（文件名查询专用通道）。
 
         路径索引只依赖路径文本与扩展名语义，不需要 chunk 内容，因此放在
         embed_pending 完成后统一批量写入，避免 ingest 阶段多一次 embedding
         拖慢上传。依赖/构建/二进制路径由 is_indexable_path 排除。
+
+        precomputed：第二阶段合并嵌入时已算好的路径文档向量（按 blob_name），
+        命中的免再发请求；缺席的（如阶段一置 ready 的空文件）才补一次嵌入。
         """
         if self.path_store is None:
             return
         indexable = [blob for blob in blobs if is_indexable_path(blob.path)]
         if not indexable:
             return
+        vectors_by_blob = dict(precomputed) if precomputed else {}
         docs = [
             {
                 "blob_name": blob.blob_name,
@@ -282,12 +312,16 @@ class IndexingPipeline:
             for blob in indexable
         ]
         try:
-            vectors = await self.embedder.embed_documents(
-                [doc["path_document"] for doc in docs]
-            )
-            for doc, vector in zip(docs, vectors):
+            missing = [doc for doc in docs if doc["blob_name"] not in vectors_by_blob]
+            if missing:
+                vectors = await self.embedder.embed_documents(
+                    [doc["path_document"] for doc in missing]
+                )
+                for doc, vector in zip(missing, vectors):
+                    vectors_by_blob[doc["blob_name"]] = vector
+            for doc in docs:
                 doc["path_id"] = f"path_{doc['blob_name']}"
-                doc["path_vector"] = vector
+                doc["path_vector"] = vectors_by_blob[doc["blob_name"]]
             result = await self.path_store.insert(docs)
             logger.info(
                 "path index write: {} blobs ({})",

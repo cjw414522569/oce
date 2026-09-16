@@ -363,3 +363,44 @@ async def test_find_error_names_and_reset_semantics():
             repo = SqlBlobRepository(session)
             repo_names = await repo.find_error_names(10)
         assert repo_names == [hash_api_key("e1")]
+
+
+async def test_completed_at_persists_on_update_path():
+    """回归：blob 先插 pending 再 mark_ready 走 upsert UPDATE 分支，
+    completed_at 必须落库（否则吞吐指标恒 0）。"""
+    from oce.infrastructure.persistence.sql_blob_repo import SqlBlobRepository
+    from oce.shared.database.session import Base
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from oce.domain.blob.blob import Blob as BlobDomain
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        name = hash_api_key("update-path-blob")
+        async with factory() as s:
+            repo = SqlBlobRepository(s)
+            blob = BlobDomain(blob_name=name, path="a.py")
+            await repo.save(blob)
+            await s.commit()
+        async with factory() as s:
+            repo = SqlBlobRepository(s)
+            blob = await repo.get(name)
+            blob.mark_ready()
+            await repo.save(blob)
+            await s.commit()
+        async with factory() as s:
+            from sqlalchemy import select
+
+            from oce.infrastructure.persistence.models import BlobModel
+
+            row = (
+                (await s.execute(select(BlobModel).where(BlobModel.blob_name == name)))
+                .scalars()
+                .one()
+            )
+            assert row.status == "ready"
+            assert row.completed_at is not None, "UPDATE 分支丢失 completed_at"
+    finally:
+        await engine.dispose()

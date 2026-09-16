@@ -164,6 +164,10 @@ class SqlBlobRepository(BlobRepository):
                 "retry_count": stmt.excluded.retry_count,
                 "last_seen": stmt.excluded.last_seen,
                 "error_message": stmt.excluded.error_message,
+                # worker 对既有行（pending→ready/error）走 UPDATE 分支，
+                # 时间戳不进 set_ 会静默丢失——吞吐/失败指标恒 0 的事故根因
+                "completed_at": stmt.excluded.completed_at,
+                "failed_at": stmt.excluded.failed_at,
             },
         )
         await self.session.execute(stmt)

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Sequence
 
 from loguru import logger
@@ -58,6 +59,7 @@ class IndexingPipeline:
         self.chunk_repo = chunk_repo
         self.event_bus = event_bus
         self.embed_batch_size = embed_batch_size
+        self._chunk_lock = asyncio.Lock()
         self.path_store = path_store
 
     async def ingest(self, blob_name: str, path: str, content: str) -> int:
@@ -158,7 +160,12 @@ class IndexingPipeline:
                     continue
 
                 # RecursiveChunker 已经过滤了无意义的块，无需再次过滤
-                chunks = list(self.chunker.chunk(content, blob.path))
+                # tree-sitter 切块是 CPU 同步调用：直接跑会阻塞事件循环（worker 并发越高
+                # 互相卡得越狠）；挪进线程池并用锁串行——循环不被卡，解析器也单线程使用
+                async with self._chunk_lock:
+                    chunks = await asyncio.to_thread(
+                        lambda: list(self.chunker.chunk(content, blob.path))
+                    )
                 if chunks:
                     # 保存 chunks（包含 chunk_type）
                     await self.chunk_repo.save_many(chunks)

@@ -99,6 +99,8 @@ class BlobModel(Base):
     file_type = Column(String(16), nullable=False, default="text")
     status = Column(String(16), nullable=False, default="pending")
     retry_count = Column(Integer, nullable=False, server_default="0")
+    # worker 完成嵌入的时间（吞吐统计）；存量行为迁移回填的近似值
+    completed_at = Column(DateTime(timezone=True))
     last_seen = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     error_message = Column(Text)
@@ -109,6 +111,7 @@ class BlobModel(Base):
         Index("ix_blobs_last_seen", "last_seen"),
         Index("ix_blobs_language", "language"),
         Index("ix_blobs_retry_count", "retry_count"),
+        Index("ix_blobs_completed_at", "completed_at"),
     )
 
 

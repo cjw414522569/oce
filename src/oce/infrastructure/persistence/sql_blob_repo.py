@@ -55,6 +55,27 @@ class SqlBlobRepository(BlobRepository):
             for row in rows
         }
 
+    async def count_completed_windows(
+        self, windows: dict[str, int]
+    ) -> dict[str, int]:
+        """单查询按时间窗统计已完成 blob 数（吞吐视图）。
+
+        FILTER 聚合在 PG 与 SQLite 3.30+ 均原生支持；窗口名仅作结果键。
+        """
+        cutoff = datetime.now(timezone.utc)
+        columns = []
+        for name, seconds in windows.items():
+            threshold = cutoff - timedelta(seconds=seconds)
+            columns.append(
+                func.count()
+                .filter(BlobModel.completed_at >= threshold)
+                .label(name)
+            )
+        row = (
+            await self.session.execute(select(*columns))
+        ).one()
+        return {name: int(getattr(row, name)) for name in windows}
+
     async def exists(self, blob_name: str) -> bool:
         count = await self.session.scalar(
             select(func.count()).select_from(BlobModel).where(BlobModel.blob_name == blob_name)
@@ -89,6 +110,7 @@ class SqlBlobRepository(BlobRepository):
                 "created_at": blob.created_at,
                 "error_message": blob.error_message,
                 "uploaded_by": blob.uploaded_by,
+                "completed_at": blob.completed_at,
             }
             for blob in blobs
         ]
@@ -346,4 +368,5 @@ class SqlBlobRepository(BlobRepository):
             created_at=row.created_at,
             error_message=row.error_message,
             uploaded_by=row.uploaded_by,
+            completed_at=row.completed_at,
         )

@@ -47,3 +47,35 @@ class QueueStatusQueryHandler:
             inflight=len(await self._queue.inflight_set()),
             db_pending=db_pending,
         )
+
+
+# 吞吐视图窗口：名称 → 秒
+THROUGHPUT_WINDOWS: dict[str, int] = {
+    "last_1m": 60,
+    "last_1h": 3600,
+    "last_24h": 86400,
+    "last_7d": 604800,
+    "last_30d": 2592000,
+}
+
+
+@dataclass(frozen=True)
+class QueueThroughputQuery(Query):
+    pass
+
+
+@dataclass(frozen=True)
+class QueueThroughputResult:
+    counts: dict[str, int]
+
+
+class QueueThroughputQueryHandler:
+    """运维吞吐视图：各时间窗完成的 blob 数（completed_at 打点）。"""
+
+    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def handle(self, _query: QueueThroughputQuery) -> QueueThroughputResult:
+        async with self._uow_factory() as uow:
+            counts = await uow.blobs.count_completed_windows(THROUGHPUT_WINDOWS)
+        return QueueThroughputResult(counts=counts)

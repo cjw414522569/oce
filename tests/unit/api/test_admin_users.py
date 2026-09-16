@@ -206,3 +206,15 @@ async def test_registration_quota_endpoints(client):
         headers={"Authorization": "Bearer sk-admin"},
     )
     assert invalid.status_code == 422
+
+
+async def test_queue_throughput_endpoint(client):
+    class _ThroughputApp(StubApplication):
+        async def queue_throughput(self):
+            return {"last_1m": 3, "last_1h": 42, "last_24h": 900, "last_7d": 7000, "last_30d": 14000}
+
+    app = client._transport.app  # noqa: SLF001
+    app.dependency_overrides[get_application] = lambda: _ThroughputApp()
+    resp = await client.get("/admin/queue/throughput", headers={"Authorization": "Bearer sk-admin"})
+    assert resp.status_code == 200
+    assert resp.json()["counts"]["last_1h"] == 42

@@ -245,3 +245,44 @@ async def test_registration_quota_blocks_new_but_not_existing():
             await service.authenticate("code")
         # 既有用户不受影响
         assert (await store.get_user_by_linuxdo(76)) is not None
+
+
+async def test_count_completed_windows():
+    from datetime import datetime, timezone
+
+    from oce.infrastructure.persistence.sql_blob_repo import SqlBlobRepository
+
+    async with _store() as (_, session_factory):
+        async with session_factory() as session:
+            repo = SqlBlobRepository(session)
+            now = datetime.now(timezone.utc)
+            from oce.domain.blob.blob import Blob
+
+            for minutes_ago, name in ((0.5, "a"), (30, "b"), (3 * 60, "c"), (10 * 24 * 60, "d")):
+                blob = Blob(blob_name=hash_api_key(name), path=f"{name}.py")
+                blob.status = blob.status.READY
+                blob.completed_at = datetime.fromtimestamp(
+                    now.timestamp() - minutes_ago * 60, tz=timezone.utc
+                )
+                from oce.infrastructure.persistence.models import BlobModel
+
+                session.add(
+                    BlobModel(
+                        blob_name=blob.blob_name,
+                        path=blob.path,
+                        content_size=1,
+                        file_type="text",
+                        status="ready",
+                        completed_at=blob.completed_at,
+                    )
+                )
+            await session.commit()
+
+            counts = await repo.count_completed_windows(
+                {"last_1m": 60, "last_1h": 3600, "last_24h": 86400, "last_7d": 604800, "last_30d": 2592000}
+            )
+        assert counts["last_1m"] == 1
+        assert counts["last_1h"] == 2
+        assert counts["last_24h"] == 3
+        assert counts["last_7d"] == 3
+        assert counts["last_30d"] == 4

@@ -470,6 +470,12 @@ class CredentialDuplicateRequest(BaseModel):
     num_rewrites: int | None = None
 
 
+class QueueThroughputResponse(BaseModel):
+    """各时间窗完成的 blob 数（键如 last_1m/last_1h/last_24h/last_7d/last_30d）。"""
+
+    counts: dict[str, int] = Field(default_factory=dict)
+
+
 class QueueStatusResponse(BaseModel):
     enabled: bool
     main_size: int = 0

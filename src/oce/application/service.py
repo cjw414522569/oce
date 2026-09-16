@@ -43,7 +43,11 @@ from oce.application.user_access import (
     SetUserStatusCommand,
     UserRecord,
 )
-from oce.application.queries.queue import QueueStatusQuery, QueueStatusResult
+from oce.application.queries.queue import (
+    QueueStatusQuery,
+    QueueStatusResult,
+    QueueThroughputQuery,
+)
 from oce.application.queries.reports import (
     ApiCallsReportQuery,
     EmptyQueriesQuery,
@@ -253,6 +257,9 @@ class RetrievalApplication:
 
     async def queue_status(self) -> QueueStatusResult:
         return await self._queries.ask(QueueStatusQuery())
+
+    async def queue_throughput(self) -> dict[str, int]:
+        return (await self._queries.ask(QueueThroughputQuery())).counts
 
     async def reset_queue(
         self, *, mode: str = "sync", requeue: bool = True

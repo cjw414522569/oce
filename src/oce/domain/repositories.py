@@ -50,6 +50,9 @@ class BlobRepository(Protocol):
         """查找有 staging 但长时间未处理的 pending blob(用于重新入队或清理)"""
         ...
 
+    def count_completed_windows(self, windows: dict[str, int]) -> dict[str, int]:
+        """按窗口名→秒数统计 completed_at 落窗内的 blob 数。"""
+
 
 class ChainRepository(Protocol):
     async def get(self, chain_id: str) -> Chain | None: ...

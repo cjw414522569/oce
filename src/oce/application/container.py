@@ -65,6 +65,8 @@ from oce.application.user_access import (
 from oce.application.queries.queue import (
     QueueStatusQuery,
     QueueStatusQueryHandler,
+    QueueThroughputQuery,
+    QueueThroughputQueryHandler,
 )
 from oce.application.queries.reports import (
     ApiCallsReportQuery,
@@ -546,6 +548,10 @@ class Container:
         query_bus.register(
             QueueStatusQuery,
             QueueStatusQueryHandler(self._uow_factory, self.queue),
+        )
+        query_bus.register(
+            QueueThroughputQuery,
+            QueueThroughputQueryHandler(self._uow_factory),
         )
 
         self.command_bus = command_bus

@@ -28,6 +28,7 @@ from oce.api.schemas import (
     QueueResetRequest,
     QueueResetResponse,
     QueueStatusResponse,
+    QueueThroughputResponse,
     ReloadCredentialsResponse,
     RequeueStaleRequest,
     RequeueStaleResponse,
@@ -292,6 +293,14 @@ async def queue_status(
         inflight=status.inflight,
         db_pending=status.db_pending,
     )
+
+@admin_router.get("/queue/throughput", response_model=QueueThroughputResponse)
+async def queue_throughput(
+    application: RetrievalApplication = Depends(get_application),
+) -> QueueThroughputResponse:
+    """队列吞吐：各时间窗（1m/1h/24h/7d/30d）完成的 blob 数。"""
+    return QueueThroughputResponse(counts=await application.queue_throughput())
+
 
 
 @admin_router.post("/queue/reset", response_model=QueueResetResponse)

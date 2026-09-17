@@ -95,10 +95,27 @@ services:
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
+    # 2026-09-17 OOM 事故：无上限时 standalone 吃到 4.9GB（宿主共 7.9GB）被内核 OOM 杀，
+    # 进入 929 次重启循环。cgroup 硬上限 + 写入水位线 + 内存瘦身三重防护。
+    mem_limit: 4500m
+    memswap_limit: 4500m
     environment:
       MINIO_REGION: us-east-1
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+      # 提早封存：默认 1024MB×0.12≈123MB，改 256MB×0.5=128MB 即 seal 落 MinIO，降低常驻内存
+      DATACOORD_SEGMENT_MAXSIZE: 256
+      DATACOORD_SEGMENT_SEALPROPORTION: 0.5
+      # growing 段 mmap：重写入期最大内存来源转由页缓存承载
+      QUERYNODE_MMAP_GROWINGMMAPENABLED: "true"
+      # HNSW 索引文件 mmap：索引页可被内核回收，显著降低常驻 RSS
+      QUERYNODE_MMAP_VECTORINDEX: "true"
+      # 关闭 growing/未索引段的临时索引（省内存，检索在该阶段退化为暴力扫描，可接受）
+      QUERYNODE_SEGCORE_INTERIMINDEX_ENABLEINDEX: "false"
+      # 关闭写入配额：8GB 宿主上配额分母（宿主 vs cgroup 总量）与实际 RSS 对不上，
+      # 曾 0.55 水位线触发永久 force-deny 且 SDK 静默无限重试（worker 全挂起零日志）。
+      # 内存越界交给 cgroup 4.5G 硬墙：只杀 milvus 自身、auto restart、数据持久层无恙
+      QUOTAANDLIMITS_ENABLED: "false"
     volumes:
       - milvus_data:/var/lib/milvus
     ports:

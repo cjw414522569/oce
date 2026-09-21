@@ -316,8 +316,8 @@ class Container:
                 decode_responses=True,
                 encoding="utf-8",
                 # 池必须 > worker 并发：dequeue 的 BRPOPLPUSH 在阻塞等待期间独占连接
-                # （48 worker 常驻占 48 个），余量留给 API/门户
-                max_connections=80,
+                # （64 worker 常驻占 64 个），余量留给 API/门户
+                max_connections=96,
                 socket_timeout=10.0,  # socket 超时 10 秒
                 socket_connect_timeout=5.0,  # 连接超时 5 秒
                 socket_keepalive=True,  # TCP keepalive

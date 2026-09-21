@@ -104,7 +104,7 @@ class EmbeddingSettings(BaseSettings):
     )
     max_input_chars: int = Field(default=8_000, ge=1, description="单条模型输入字符上限")
     input_overlap_chars: int = Field(default=400, ge=0, description="长输入分段重叠字符数")
-    max_concurrency: int = Field(default=4, ge=1, le=32, description="最大请求并发")
+    max_concurrency: int = Field(default=4, ge=1, le=128, description="最大请求并发")
     timeout_seconds: float = Field(default=60.0, gt=0, description="请求超时秒数")
     proxy: str | None = Field(default=None, description="可选 HTTP 代理")
     query_instruction: str = Field(
@@ -291,7 +291,7 @@ class WorkerSettings(BaseSettings):
     )
 
     enabled: bool = Field(default=True, description="是否启用后台 worker", json_schema_extra={"tier": 2})
-    concurrency: int = Field(default=2, ge=1, le=32, description="并发消费协程数")
+    concurrency: int = Field(default=2, ge=1, le=128, description="并发消费协程数")
     max_retries: int = Field(default=3, ge=1, le=10, description="失败重试上限")
 
 

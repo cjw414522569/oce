@@ -33,3 +33,4 @@ logs
 
 # oce 客户端本地索引状态
 .oce-client/
+oce-admin/

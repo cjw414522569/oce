@@ -90,6 +90,17 @@ class AdminUserOverview:
     total_tokens_24h: int = 0
 
 
+@dataclass(frozen=True)
+class LeaderboardEntry:
+    """今日用量榜条目；排序由 store 保证（tokens 降序，calls 次级）。"""
+
+    user_id: int
+    username: str
+    name: str | None
+    api_calls: int = 0
+    total_tokens: int = 0
+
+
 class OAuthProvider(Protocol):
     """LinuxDo OAuth2 客户端端口（infrastructure 实现）。"""
 
@@ -132,7 +143,11 @@ class UserAccessStore(Protocol):
 
     async def usage_summary(self, user_id: int, window_hours: int) -> UserUsageSummary: ...
 
-    async def list_users_with_usage(self, window_hours: int = 24) -> tuple[AdminUserOverview, ...]: ...
+    async def usage_leaderboard(self, day_start: datetime) -> list[LeaderboardEntry]: ...
+
+    async def list_users_with_usage(
+        self, window_hours: int = 24, *, page: int = 1, page_size: int = 0, search: str = ""
+    ) -> AdminUserPage: ...
 
 
 class UserAccessService:
@@ -177,6 +192,13 @@ class UserAccessService:
         if await self._store.get_active_api_key(user.id) is None:
             await self._store.rotate_api_key(user.id)
         return user
+
+    async def usage_leaderboard(
+        self, day_start: datetime, limit: int = 0
+    ) -> list[LeaderboardEntry]:
+        """今日用量榜；limit>0 时截断前 N 名（调用方需要自己的完整排名时不截断）。"""
+        entries = await self._store.usage_leaderboard(day_start)
+        return entries[:limit] if limit > 0 else entries
 
     async def get_portal(self, user_id: int) -> PortalView:
         user = await self._store.get_user(user_id)

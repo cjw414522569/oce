@@ -447,3 +447,53 @@ async def test_count_pending():
         async with session_factory() as session:
             repo = SqlBlobRepository(session)
             assert await repo.count_pending() == 2
+
+
+async def test_usage_leaderboard_orders_and_excludes_polling():
+    from datetime import datetime, timedelta, timezone
+
+    from oce.infrastructure.persistence.models import ApiCallMetricModel, TokenUsageMetricModel
+
+    async with _store() as (store, session_factory):
+        heavy = await store.upsert_user(_profile(linuxdo_id=6001, username="heavy"))
+        light = await store.upsert_user(_profile(linuxdo_id=6002, username="light"))
+
+        day_start = datetime.now(timezone.utc) - timedelta(hours=1)
+        async with session_factory() as session:
+            for _ in range(3):
+                session.add(
+                    ApiCallMetricModel(
+                        endpoint="/v1/embeddings",
+                        method="POST",
+                        status_code=200,
+                        latency_ms=10,
+                        user_id=heavy.id,
+                    )
+                )
+            session.add(
+                ApiCallMetricModel(
+                    endpoint="/v1/embeddings",
+                    method="POST",
+                    status_code=200,
+                    latency_ms=10,
+                    user_id=light.id,
+                )
+            )
+            # 轮询端点不计入
+            session.add(
+                ApiCallMetricModel(
+                    endpoint="/agents/blob-status",
+                    method="POST",
+                    status_code=200,
+                    latency_ms=3,
+                    user_id=heavy.id,
+                )
+            )
+            session.add(TokenUsageMetricModel(kind="embed", model="m", total_tokens=500, user_id=light.id))
+            session.add(TokenUsageMetricModel(kind="embed", model="m", total_tokens=100, user_id=heavy.id))
+            await session.commit()
+
+        board = await store.usage_leaderboard(day_start - timedelta(minutes=1))
+        assert [e.user_id for e in board] == [light.id, heavy.id]  # tokens 降序
+        assert board[0].total_tokens == 500 and board[0].api_calls == 1
+        assert board[1].total_tokens == 100 and board[1].api_calls == 3  # 轮询 1 次被排除

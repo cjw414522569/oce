@@ -573,6 +573,22 @@ class RotateKeyResponse(BaseModel):
     key_last4: str
 
 
+class LeaderboardEntryResponse(BaseModel):
+    rank: int
+    user_id: int
+    username: str
+    name: str | None = None
+    api_calls: int = 0
+    total_tokens: int = 0
+
+
+class LeaderboardResponse(BaseModel):
+    day: str  # "今日"的日期标签（Asia/Shanghai）
+    entries: list[LeaderboardEntryResponse] = Field(default_factory=list)
+    me: LeaderboardEntryResponse | None = None
+    total_users: int = 0  # 今日有用量的用户总数
+
+
 class AdminUserEntryResponse(BaseModel):
     id: int
     username: str

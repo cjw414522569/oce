@@ -21,6 +21,7 @@ from oce.application.user_access import (
     AdminUserPage,
     ApiKeyIdentity,
     IssuedApiKey,
+    LeaderboardEntry,
     LinuxDoProfile,
     UserApiKeyView,
     UserRecord,
@@ -352,6 +353,65 @@ class SqlUserAccessStore:
         return UserUsageSummary(
             window_hours=window_hours, api_calls=int(calls), total_tokens=int(tokens)
         )
+
+    async def usage_leaderboard(self, day_start: datetime) -> list[LeaderboardEntry]:
+        """自 day_start（含）以来各用户的调用量/Token；tokens 降序、calls 次级。
+
+        与 usage_summary 同口径：轮询端点不计入调用次数。
+        """
+        async with self._session_factory() as session:
+            call_rows = dict(
+                (
+                    await session.execute(
+                        select(ApiCallMetricModel.user_id, func.count())
+                        .where(
+                            ApiCallMetricModel.ts >= day_start,
+                            ApiCallMetricModel.user_id.is_not(None),
+                            ApiCallMetricModel.endpoint.notin_(POLLING_ENDPOINTS),
+                        )
+                        .group_by(ApiCallMetricModel.user_id)
+                    )
+                ).all()
+            )
+            token_rows = dict(
+                (
+                    await session.execute(
+                        select(
+                            TokenUsageMetricModel.user_id,
+                            func.coalesce(func.sum(TokenUsageMetricModel.total_tokens), 0),
+                        )
+                        .where(
+                            TokenUsageMetricModel.ts >= day_start,
+                            TokenUsageMetricModel.user_id.is_not(None),
+                        )
+                        .group_by(TokenUsageMetricModel.user_id)
+                    )
+                ).all()
+            )
+            user_ids = set(call_rows) | set(token_rows)
+            if not user_ids:
+                return []
+            profiles = (
+                (
+                    await session.execute(
+                        select(UserModel.id, UserModel.username, UserModel.name).where(
+                            UserModel.id.in_(user_ids)
+                        )
+                    )
+                ).all()
+            )
+        entries = [
+            LeaderboardEntry(
+                user_id=uid,
+                username=username,
+                name=name,
+                api_calls=int(call_rows.get(uid, 0)),
+                total_tokens=int(token_rows.get(uid, 0)),
+            )
+            for uid, username, name in profiles
+        ]
+        entries.sort(key=lambda e: (e.total_tokens, e.api_calls), reverse=True)
+        return entries
 
     async def list_users_with_usage(
         self,

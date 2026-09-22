@@ -20,6 +20,8 @@ from oce.api.schemas import (
     AuthMeResponse,
     AuthUsageWindowResponse,
     AuthUserResponse,
+    LeaderboardEntryResponse,
+    LeaderboardResponse,
     RotateKeyResponse,
 )
 from oce.application.container import get_container
@@ -145,6 +147,55 @@ async def rotate_key(
         # 用户已被删/禁：会话等价失效
         raise HTTPException(status_code=401, detail="user unavailable") from None
     return RotateKeyResponse(api_key=issued.api_key, key_last4=issued.key_last4)
+
+
+@auth_router.get("/leaderboard", response_model=LeaderboardResponse)
+async def usage_leaderboard(
+    user_id: int = Depends(get_session_user_id),
+    service: UserAccessService = Depends(get_user_access),
+) -> LeaderboardResponse:
+    """今日用量排行榜：北京时间当日 0 点起算，Top 50 + 请求者自身排名。
+
+    口径与个人用量一致（轮询端点不计）；排序 tokens 降序、calls 次级。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("Asia/Shanghai")
+    except Exception:  # tzdata 缺失时退化为固定偏移
+        tz = timezone(timedelta(hours=8))
+    now_local = datetime.now(tz)
+    day_start = now_local.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).astimezone(timezone.utc)
+
+    entries = await service.usage_leaderboard(day_start)
+    top = entries[:50]
+
+    def _entry(rank: int, e) -> LeaderboardEntryResponse:
+        return LeaderboardEntryResponse(
+            rank=rank,
+            user_id=e.user_id,
+            username=e.username,
+            name=e.name,
+            api_calls=e.api_calls,
+            total_tokens=e.total_tokens,
+        )
+
+    me_rank = next((i for i, e in enumerate(entries, 1) if e.user_id == user_id), None)
+    me = (
+        _entry(me_rank, entries[me_rank - 1])
+        if me_rank is not None
+        else None
+    )
+    return LeaderboardResponse(
+        day=now_local.strftime("%Y-%m-%d"),
+        entries=[_entry(i, e) for i, e in enumerate(top, 1)],
+        me=me,
+        total_users=len(entries),
+    )
 
 
 def _me_response(view: PortalView) -> AuthMeResponse:

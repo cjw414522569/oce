@@ -223,3 +223,36 @@ async def test_rotate_unavailable_user_maps_to_401(client, monkeypatch):
     app.dependency_overrides[ar.get_user_access] = lambda: _DeniedService()
     resp = await client.post("/auth/key/rotate")
     assert resp.status_code == 401
+
+
+async def test_leaderboard_returns_top_and_me(app, client):
+    from oce.application.user_access import LeaderboardEntry
+
+    class _BoardService(StubService):
+        async def usage_leaderboard(self, day_start, limit=0):
+            entries = [
+                LeaderboardEntry(user_id=7, username="me", name="Me", api_calls=2, total_tokens=100),
+                LeaderboardEntry(user_id=8, username="top", name="Top", api_calls=9, total_tokens=900),
+                LeaderboardEntry(user_id=9, username="mid", name="Mid", api_calls=5, total_tokens=400),
+            ]
+            entries.sort(key=lambda e: (e.total_tokens, e.api_calls), reverse=True)
+            return entries[:limit] if limit > 0 else entries
+
+    application = client._transport.app  # noqa: SLF001
+    application.dependency_overrides[get_user_access] = lambda: _BoardService()
+
+    cookie = {SESSION_COOKIE: sign_payload("u:7", 3600, SECRET)}
+    resp = await client.get("/auth/leaderboard", cookies=cookie)
+    assert resp.status_code == 200
+    body = resp.json()
+    # 排序 tokens 降序，Top 50 全量返回
+    assert [e["username"] for e in body["entries"]] == ["top", "mid", "me"]
+    assert body["entries"][0]["rank"] == 1
+    # 请求者（uid=7）不在榜首也能拿到自己的排名
+    assert body["me"]["rank"] == 3 and body["me"]["username"] == "me"
+    assert body["total_users"] == 3
+
+
+async def test_leaderboard_requires_session(client):
+    resp = await client.get("/auth/leaderboard")
+    assert resp.status_code == 401

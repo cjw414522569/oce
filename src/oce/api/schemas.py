@@ -588,6 +588,9 @@ class AdminUserEntryResponse(BaseModel):
 
 class AdminUserListResponse(BaseModel):
     users: list[AdminUserEntryResponse] = Field(default_factory=list)
+    total: int = 0  # 过滤后的总数；page_size=0 全量时等于 len(users)
+    page: int = 1
+    page_size: int = 0  # 0 = 全量
 
 
 class AdminUserStatusRequest(BaseModel):

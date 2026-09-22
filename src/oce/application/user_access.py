@@ -242,6 +242,17 @@ class RegistrationInfo:
 @dataclass(frozen=True)
 class ListUsersQuery(Query):
     window_hours: int = 24
+    page: int = 1        # 1-based；page_size=0 时忽略（全量，向后兼容）
+    page_size: int = 0   # 0 = 不分页
+    search: str = ""     # username / name 模糊，纯数字时附带 ID 精确匹配
+
+
+@dataclass(frozen=True)
+class AdminUserPage:
+    """分页结果：items 为当前页，total 为过滤后的总数。"""
+
+    items: tuple[AdminUserOverview, ...]
+    total: int
 
 
 class ListUsersQueryHandler:
@@ -250,8 +261,13 @@ class ListUsersQueryHandler:
     def __init__(self, service: UserAccessService) -> None:
         self._service = service
 
-    async def handle(self, query: ListUsersQuery) -> tuple[AdminUserOverview, ...]:
-        return await self._service.store.list_users_with_usage(query.window_hours)
+    async def handle(self, query: ListUsersQuery) -> AdminUserPage:
+        return await self._service.store.list_users_with_usage(
+            query.window_hours,
+            page=query.page,
+            page_size=query.page_size,
+            search=query.search,
+        )
 
 
 @dataclass(frozen=True)

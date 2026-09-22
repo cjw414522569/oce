@@ -163,12 +163,33 @@ async def test_usage_summary_and_admin_listing():
         # 轮询 5 次被排除：只数 1 次真实调用
         assert summary.api_calls == 1 and summary.total_tokens == 100
 
-        overviews = await store.list_users_with_usage(24)
-        assert len(overviews) == 1
-        assert overviews[0].user.id == user.id
-        assert overviews[0].api_key_last4 == issued.key_last4
-        assert overviews[0].api_calls_24h == 1
-        assert overviews[0].total_tokens_24h == 100
+        page = await store.list_users_with_usage(24)
+        assert page.total == 1
+        assert page.items[0].user.id == user.id
+        assert page.items[0].api_key_last4 == issued.key_last4
+        assert page.items[0].api_calls_24h == 1
+        assert page.items[0].total_tokens_24h == 100
+
+
+async def test_list_users_with_usage_paginated_and_search():
+    async with _store() as (store, _):
+        for i, name in enumerate(("alice", "bob", "carol")):
+            await store.upsert_user(
+                _profile(linuxdo_id=5000 + i, username=name, name=name.title())
+            )
+        full = await store.list_users_with_usage(24)
+        assert full.total == 3 and len(full.items) == 3
+
+        p1 = await store.list_users_with_usage(24, page=1, page_size=2)
+        p2 = await store.list_users_with_usage(24, page=2, page_size=2)
+        assert (p1.total, p2.total) == (3, 3)
+        assert [o.user.username for o in p1.items] == ["alice", "bob"]
+        assert [o.user.username for o in p2.items] == ["carol"]
+
+        hit = await store.list_users_with_usage(24, page=1, page_size=2, search="bo")
+        assert hit.total == 1 and hit.items[0].user.username == "bob"
+        miss = await store.list_users_with_usage(24, page=1, page_size=2, search="zzz")
+        assert miss.total == 0 and miss.items == ()
 
 
 async def test_touch_throttled_within_window():

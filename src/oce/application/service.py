@@ -36,7 +36,7 @@ from oce.application.credential_admin import (
     UpdateCredentialCommand,
 )
 from oce.application.user_access import (
-    AdminUserOverview,
+    AdminUserPage,
     DeleteUsersByIdsCommand,
     DeleteUsersRegisteredCommand,
     DeleteUsersResult,
@@ -288,8 +288,16 @@ class RetrievalApplication:
     async def list_credentials(self) -> list[CredentialRecord]:
         return await self._queries.ask(ListCredentialsQuery())
 
-    async def list_users(self) -> tuple[AdminUserOverview, ...]:
-        return await self._queries.ask(ListUsersQuery())
+    async def list_users(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 0,
+        search: str = "",
+    ) -> AdminUserPage:
+        return await self._queries.ask(
+            ListUsersQuery(page=page, page_size=page_size, search=search)
+        )
 
     async def set_user_status(self, user_id: int, status: str) -> UserRecord:
         return await self._commands.execute(SetUserStatusCommand(user_id, status))

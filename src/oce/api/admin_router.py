@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from oce.api.router import get_application
 from oce.api.schemas import (
@@ -80,9 +80,17 @@ async def list_credentials(
 @admin_router.get("/users", response_model=AdminUserListResponse)
 async def list_users(
     application: RetrievalApplication = Depends(get_application),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(0, ge=0, le=500),
+    search: str = Query(""),
 ) -> AdminUserListResponse:
-    """多用户总览：身份 + active key 末 4 位 + 24h 用量，供运维排查滥用。"""
-    overviews = await application.list_users()
+    """多用户总览：身份 + active key 末 4 位 + 24h 用量，供运维排查滥用。
+
+    page_size=0（默认）全量返回，向后兼容；>0 时服务端分页并回填 total。
+    """
+    result = await application.list_users(
+        page=page, page_size=page_size, search=search
+    )
     return AdminUserListResponse(
         users=[
             AdminUserEntryResponse(
@@ -97,8 +105,11 @@ async def list_users(
                 api_calls_24h=o.api_calls_24h,
                 total_tokens_24h=o.total_tokens_24h,
             )
-            for o in overviews
-        ]
+            for o in result.items
+        ],
+        total=result.total,
+        page=page,
+        page_size=page_size,
     )
 
 

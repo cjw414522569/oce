@@ -17,8 +17,14 @@ from oce.auth import _unauthorized, verify_admin_key
 class StubApplication:
     users: tuple = field(default_factory=tuple)
 
-    async def list_users(self) -> Any:
-        return self.users
+    async def list_users(self, *, page: int = 1, page_size: int = 0, search: str = "") -> Any:
+        from oce.application.user_access import AdminUserPage
+
+        items = self.users
+        if page_size > 0:
+            start = (page - 1) * page_size
+            items = items[start : start + page_size]
+        return AdminUserPage(items=tuple(items), total=len(self.users))
 
 
 def _overview(username: str):
@@ -73,6 +79,23 @@ async def test_lists_users_with_usage(client):
     assert entry["api_key_last4"] == "abcd"
     assert entry["api_calls_24h"] == 5
     assert entry["total_tokens_24h"] == 250
+    assert body["total"] == 1  # page_size=0 全量兼容路径
+
+
+async def test_lists_users_paginated(client):
+    app = client._transport.app  # noqa: SLF001
+    app.dependency_overrides[get_application] = lambda: StubApplication(
+        users=tuple(_overview(name) for name in ("alice", "bob", "carol"))
+    )
+    resp = await client.get(
+        "/admin/users?page=2&page_size=2",
+        headers={"Authorization": "Bearer sk-admin"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [u["username"] for u in body["users"]] == ["carol"]
+    assert body["total"] == 3
+    assert body["page"] == 2 and body["page_size"] == 2
 
 
 async def test_admin_key_required(client):

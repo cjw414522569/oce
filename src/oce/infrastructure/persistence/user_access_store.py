@@ -12,12 +12,13 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, false, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oce.application.user_access import (
     AdminUserOverview,
+    AdminUserPage,
     ApiKeyIdentity,
     IssuedApiKey,
     LinuxDoProfile,
@@ -353,23 +354,88 @@ class SqlUserAccessStore:
         )
 
     async def list_users_with_usage(
-        self, window_hours: int = 24
-    ) -> tuple[AdminUserOverview, ...]:
-        """小结果集三段查询 + Python 拼装，避免方言特定的聚合/子查询。"""
+        self,
+        window_hours: int = 24,
+        *,
+        page: int = 1,
+        page_size: int = 0,
+        search: str = "",
+    ) -> AdminUserPage:
+        """三段查询 + Python 拼装，避免方言特定的聚合/子查询。
+
+        page_size>0 时服务端分页：keys/统计三段都限定当前页用户，
+        total 单独 count。search 匹配 username/name 模糊，纯数字附带 ID 精确。
+        page_size=0 保持全量（向后兼容），此时 total=len(items)。
+        """
         cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
         async with self._session_factory() as session:
-            users = (
-                (await session.execute(select(UserModel).order_by(UserModel.id)))
-                .scalars()
-                .all()
-            )
+            user_filter = True
+            if search := search.strip():
+                user_filter = or_(
+                    UserModel.username.ilike(f"%{search}%"),
+                    UserModel.name.ilike(f"%{search}%"),
+                )
+                if search.isdigit():
+                    user_filter = or_(user_filter, UserModel.id == int(search))
+
+            if page_size > 0:
+                total = int(
+                    (
+                        await session.execute(
+                            select(func.count())
+                            .select_from(UserModel)
+                            .where(user_filter)
+                        )
+                    ).scalar_one()
+                )
+                users = (
+                    (
+                        await session.execute(
+                            select(UserModel)
+                            .where(user_filter)
+                            .order_by(UserModel.id)
+                            .offset((max(1, page) - 1) * page_size)
+                            .limit(page_size)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                page_ids = [user.id for user in users]
+
+                def _scope(col):
+                    # 每张表各自构建 in_ 表达式：跨表复用同一列表达式会带入其
+                    # FROM 元素，触发 SQLAlchemy 笛卡尔积告警
+                    return col.in_(page_ids) if page_ids else false()
+
+                id_scope = _scope(UserApiKeyModel.user_id)
+                call_scope = _scope(ApiCallMetricModel.user_id)
+                token_scope = _scope(TokenUsageMetricModel.user_id)
+            else:
+                users = (
+                    (
+                        await session.execute(
+                            select(UserModel)
+                            .where(user_filter)
+                            .order_by(UserModel.id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                total = len(users)
+                id_scope = call_scope = token_scope = True
+
             keys = {
                 row.user_id: row.key_last4
                 for row in (
                     await session.execute(
                         select(
                             UserApiKeyModel.user_id, UserApiKeyModel.key_last4
-                        ).where(UserApiKeyModel.status == "active")
+                        ).where(
+                            UserApiKeyModel.status == "active",
+                            id_scope,
+                        )
                     )
                 ).all()
             }
@@ -381,6 +447,7 @@ class SqlUserAccessStore:
                             ApiCallMetricModel.ts >= cutoff,
                             ApiCallMetricModel.user_id.is_not(None),
                             ApiCallMetricModel.endpoint.notin_(POLLING_ENDPOINTS),
+                            call_scope,
                         )
                         .group_by(ApiCallMetricModel.user_id)
                     )
@@ -396,12 +463,13 @@ class SqlUserAccessStore:
                         .where(
                             TokenUsageMetricModel.ts >= cutoff,
                             TokenUsageMetricModel.user_id.is_not(None),
+                            token_scope,
                         )
                         .group_by(TokenUsageMetricModel.user_id)
                     )
                 ).all()
             )
-        return tuple(
+        items = tuple(
             AdminUserOverview(
                 user=_user_record(user),
                 api_key_last4=keys.get(user.id),
@@ -410,3 +478,4 @@ class SqlUserAccessStore:
             )
             for user in users
         )
+        return AdminUserPage(items=items, total=total)
